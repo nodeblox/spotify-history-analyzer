@@ -3,7 +3,7 @@ import numpy as np
 import json
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pykakasi import kakasi
 from collections import defaultdict
 
@@ -30,7 +30,7 @@ def main(input_filename):
     
     append_md(output_file, f"# Analyse")
     analyse_general(data, output_file)
-    analyse_by_time(data, output_file, output_path)
+    analyse_activity_by_time(data, output_file, output_path)
 
 def load_data(file_path):
     with open(file_path, 'r', encoding='utf-8') as file:
@@ -56,6 +56,7 @@ def analyse_general(data, output_file):
     songs_with_min_duration = sum(1 for entry in data if entry.get('spotify_data', {}).get('ms_played', 0) >= 20000)
     total_duration = sum(entry.get('spotify_data', {}).get('ms_played', 0) for entry in data) / 1000  # in Sekunden
     total_duration_hours = total_duration / 3600
+    total_duration_days = total_duration_hours / 24
 
     start_date = datetime.strptime(data[0].get('spotify_data', {}).get('ts'), '%Y-%m-%dT%H:%M:%SZ').date()
     end_date = datetime.strptime(data[-1].get('spotify_data', {}).get('ts'), '%Y-%m-%dT%H:%M:%SZ').date()
@@ -74,14 +75,50 @@ def analyse_general(data, output_file):
                             f"- **Anzahl der Tage (mit Höraktivität):** {len(days_with_activity)}\n"
                             f"- **Anzahl der gehörten Songs:** {total_songs}\n"
                             f"- **Anzahl der gehörten Songs mit mindestens 20 Sekunden Hördauer:** {songs_with_min_duration}\n"
-                            f"- **Gesamthördauer:** {total_duration_hours:.2f} Stunden ({total_duration / 60:.2f} Minuten)\n"
+                            f"- **Gesamthördauer:** {total_duration_days:.2f} Tage ({total_duration_hours:.2f} Stunden) ({total_duration / 60:.2f} Minuten)\n"
                             f"- **Durchschnittliche Hördauer pro Tag:** {total_duration / days_count / 60:.2f} Minuten\n"
                             f"- **Durchschnittliche Hördauer pro Tag (mit Höraktivität):** {total_duration / len(days_with_activity)/60:.2f} Minuten\n"
                             f"- **Durchschnittliche Hördauer pro Song:** {(total_duration / total_songs) / 60:.2f} Minuten\n"
+                            f"- **Durchschnittliche Anzahl Songs (min 20s) pro Tag:** {songs_with_min_duration / days_count:.2f}\n"
                             f"- **Durchschnittliche Anzahl Songs (min 20s) pro Tag (mit Höraktivität):** {songs_with_min_duration / len(days_with_activity):.2f}\n")
 
-def analyse_by_time(data, output_file, output_path):
+def analyse_activity_by_time(data, output_file, output_path):
     print("📊 Analysiere Hörverhalten zu verschiedenen Zeiten...")
+    append_md(output_file, f"## Zeitliche Verteilung der Songs")
+
+    # Gesamtanzahl Songs pro Monat zählen
+    songs_per_month = defaultdict(int)
+
+    for entry in data:
+        ts = entry.get('spotify_data', {}).get('ts')
+        if not ts or entry.get('spotify_data', {}).get('ms_played', 0) < 20000:
+            continue
+        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+        month = date.strftime("%Y-%m")  # z.B. "2025-07"
+        songs_per_month[month] += 1
+
+    # Sortieren nach Monat (chronologisch)
+    sorted_months = sorted(songs_per_month.keys())
+    counts = [songs_per_month[m] for m in sorted_months]
+
+    # Monatsnamen im deutschen Format für die x-Achse (z.B. "07.2025")
+    labels = [datetime.strptime(m, "%Y-%m").strftime("%m.%Y") for m in sorted_months]
+
+    plt.figure(figsize=(12, 6))
+    plt.bar(labels, counts, color="skyblue")
+    plt.ylabel("Anzahl gehörter Songs")
+    plt.title("Gesamte Anzahl der gehörten Songs pro Monat")
+    plt.xticks(rotation=45)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+
+    chart_path = os.path.join(output_path, "songs_per_month.png")
+    plt.savefig(chart_path, bbox_inches='tight', pad_inches=0.5)
+    plt.close()
+
+    append_md(output_file, "### Höraktivität pro Monat\n"
+                            "Dieses Diagramm zeigt die Gesamtzahl der gehörten Songs pro Monat.\n"
+                            "![Songs pro Monat](songs_per_month.png)\n")
 
     # Dictionaries für Gesamtanzahl & Vorkommen des Wochentags
     total_songs = defaultdict(int)
@@ -89,7 +126,7 @@ def analyse_by_time(data, output_file, output_path):
 
     for entry in data:
         ts = entry.get('spotify_data', {}).get('ts')
-        if not ts:
+        if not ts or entry.get('spotify_data', {}).get('ms_played', 0) < 20000:
             continue
         date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
         weekday = date.strftime("%A")
@@ -127,9 +164,82 @@ def analyse_by_time(data, output_file, output_path):
     plt.savefig(chart_path, bbox_inches='tight', pad_inches=0.5)
     plt.close()
 
-    append_md(output_file, f"## Zeitliche Verteilung der Songs\n"
+    append_md(output_file, f"### Hörverhalten nach Wochentag\n"
                            f"Dies zeigt die **durchschnittliche** Anzahl Songs pro Tag des jeweiligen Wochentags.\n"
                            f"![Anzahl der Songs pro Tag](songs_per_day_in_week.png)\n")
+    
+    activity_by_quarter = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+    days_by_quarter = defaultdict(lambda: defaultdict(set))
+
+    for entry in data:
+        spotify_data = entry.get('spotify_data', {})
+        ts = spotify_data.get('ts')
+        ms_played = spotify_data.get('ms_played')  # Dauer in Millisekunden
+
+        if not ts or not ms_played:
+            continue
+        
+        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+        weekday = date.strftime("%A")
+        hour = date.hour
+        quarter = f"{date.year}-Q{(date.month - 1)//3 + 1}"
+        date_str = date.strftime("%Y-%m-%d")
+
+        duration_min = ms_played / 60000  # Millisekunden in Minuten umrechnen
+
+        activity_by_quarter[quarter][weekday][hour] += duration_min
+        days_by_quarter[quarter][weekday].add(date_str)
+
+    # Farben definieren für Wochentage
+    weekday_colors = {
+        "Monday": "blue",
+        "Tuesday": "orange",
+        "Wednesday": "green",
+        "Thursday": "red",
+        "Friday": "purple",
+        "Saturday": "brown",
+        "Sunday": "pink"
+    }
+
+    for quarter in sorted(activity_by_quarter.keys()):
+        plt.figure(figsize=(12, 6))
+        for weekday in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
+            hour_counts = activity_by_quarter[quarter][weekday]
+            total_days = len(days_by_quarter[quarter][weekday]) or 1  # Verhindert Division durch 0
+
+            # Mittelwert pro Stunde berechnen
+            hourly_avg = [hour_counts.get(h, 0) / total_days for h in range(24)]
+
+            plt.plot(range(24), hourly_avg, label=weekday, color=weekday_colors[weekday])
+
+            # Start- und Enddatum für das Quartal bestimmen
+        year, q = map(int, quarter.replace("-Q", "-").split("-"))
+        start_month = (q - 1) * 3 + 1
+        start_date = datetime(year, start_month, 1)
+        if start_month == 10:
+            end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end_date = datetime(year, start_month + 3, 1) - timedelta(days=1)
+
+        start_str = start_date.strftime("%d.%m.%Y")
+        end_str = end_date.strftime("%d.%m.%Y")
+
+        plt.title(f"Durchschnittliche Höraktivität pro Stunde – {start_str} bis {end_str}")
+
+        plt.xlabel("Stunde (0–23)")
+        plt.ylabel("⌀ Minuten pro Stunde")
+        plt.ylim(0, 60)
+        plt.xticks(range(0, 24))
+        plt.grid(True, linestyle='--', alpha=0.5)
+        plt.legend()
+        plt.tight_layout()
+
+        chart_path = os.path.join(output_path, f"songs_per_hour_{quarter}.png")
+        plt.savefig(chart_path, bbox_inches='tight', pad_inches=0.5)
+        plt.close()
+
+        append_md(output_file, f"### Hörverhalten nach Uhrzeit – {start_str} bis {end_str}\n"
+                                f"![Songs pro Stunde – {quarter}](songs_per_hour_{quarter}.png)\n")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
