@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from pykakasi import kakasi
 from collections import defaultdict
 
+MIN_PLAY_DURATION = 20000  # in ms
+
 def to_ascii(text):
     kks = kakasi()
     kks.setMode('J', 'a')  # Japanese zu ascii (Romaji)
@@ -25,12 +27,13 @@ def main(input_filename):
 
     clear_md(output_file)
     append_md(output_file, f"# WICHTIG:\n"
-                            f"- Es werden in bestimmten Statistiken nur Songs verarbeitet, die mindestens 20 Sekunden lang angehört wurden.\n"
+                            f"- Es werden in bestimmten Statistiken nur Songs verarbeitet, die mindestens {(MIN_PLAY_DURATION / 1000):.0f} Sekunden lang angehört wurden.\n"
                             f"- Songs, zu denen keine Tags auf Last.fm gefunden wurden, fließen nicht in tagspezifische Statistiken ein.\n")
     
     append_md(output_file, f"# Analyse")
     analyse_general(data, output_file)
     analyse_activity_by_time(data, output_file, output_path)
+    analyse_top_songs(data, output_file)
 
 def load_data(file_path):
     with open(file_path, 'r', encoding='utf-8') as file:
@@ -53,7 +56,7 @@ def clear_md(filename):
 def analyse_general(data, output_file):
     print("📊 Analysiere allgemeine Statistiken...")
     total_songs = len(data)
-    songs_with_min_duration = sum(1 for entry in data if entry.get('spotify_data', {}).get('ms_played', 0) >= 20000)
+    songs_with_min_duration = sum(1 for entry in data if entry.get('spotify_data', {}).get('ms_played', 0) >= MIN_PLAY_DURATION)
     total_duration = sum(entry.get('spotify_data', {}).get('ms_played', 0) for entry in data) / 1000  # in Sekunden
     total_duration_hours = total_duration / 3600
     total_duration_days = total_duration_hours / 24
@@ -74,13 +77,13 @@ def analyse_general(data, output_file):
                             f"- **Zeitspanne der Daten:** {start_date} bis {end_date} ({days_count} Tage)\n"
                             f"- **Anzahl der Tage (mit Höraktivität):** {len(days_with_activity)}\n"
                             f"- **Anzahl der gehörten Songs:** {total_songs}\n"
-                            f"- **Anzahl der gehörten Songs mit mindestens 20 Sekunden Hördauer:** {songs_with_min_duration}\n"
+                            f"- **Anzahl der gehörten Songs mit mindestens {(MIN_PLAY_DURATION / 1000):.0f} Sekunden Hördauer:** {songs_with_min_duration}\n"
                             f"- **Gesamthördauer:** {total_duration_days:.2f} Tage ({total_duration_hours:.2f} Stunden) ({total_duration / 60:.2f} Minuten)\n"
                             f"- **Durchschnittliche Hördauer pro Tag:** {total_duration / days_count / 60:.2f} Minuten\n"
                             f"- **Durchschnittliche Hördauer pro Tag (mit Höraktivität):** {total_duration / len(days_with_activity)/60:.2f} Minuten\n"
                             f"- **Durchschnittliche Hördauer pro Song:** {(total_duration / total_songs) / 60:.2f} Minuten\n"
-                            f"- **Durchschnittliche Anzahl Songs (min 20s) pro Tag:** {songs_with_min_duration / days_count:.2f}\n"
-                            f"- **Durchschnittliche Anzahl Songs (min 20s) pro Tag (mit Höraktivität):** {songs_with_min_duration / len(days_with_activity):.2f}\n")
+                            f"- **Durchschnittliche Anzahl Songs (min {(MIN_PLAY_DURATION / 1000):.0f}s) pro Tag:** {songs_with_min_duration / days_count:.2f}\n"
+                            f"- **Durchschnittliche Anzahl Songs (min {(MIN_PLAY_DURATION / 1000):.0f}s) pro Tag (mit Höraktivität):** {songs_with_min_duration / len(days_with_activity):.2f}\n")
 
 def analyse_activity_by_time(data, output_file, output_path):
     print("📊 Analysiere Hörverhalten zu verschiedenen Zeiten...")
@@ -91,7 +94,7 @@ def analyse_activity_by_time(data, output_file, output_path):
 
     for entry in data:
         ts = entry.get('spotify_data', {}).get('ts')
-        if not ts or entry.get('spotify_data', {}).get('ms_played', 0) < 20000:
+        if not ts or entry.get('spotify_data', {}).get('ms_played', 0) < MIN_PLAY_DURATION:
             continue
         date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
         month = date.strftime("%Y-%m")  # z.B. "2025-07"
@@ -126,7 +129,7 @@ def analyse_activity_by_time(data, output_file, output_path):
 
     for entry in data:
         ts = entry.get('spotify_data', {}).get('ts')
-        if not ts or entry.get('spotify_data', {}).get('ms_played', 0) < 20000:
+        if not ts or entry.get('spotify_data', {}).get('ms_played', 0) < MIN_PLAY_DURATION:
             continue
         date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
         weekday = date.strftime("%A")
@@ -165,8 +168,8 @@ def analyse_activity_by_time(data, output_file, output_path):
     plt.close()
 
     append_md(output_file, f"### Hörverhalten nach Wochentag\n"
-                           f"Dies zeigt die **durchschnittliche** Anzahl Songs pro Tag des jeweiligen Wochentags.\n"
-                           f"![Anzahl der Songs pro Tag](songs_per_day_in_week.png)\n")
+                            f"Dies zeigt die **durchschnittliche** Anzahl Songs pro Tag des jeweiligen Wochentags.\n"
+                            f"![Anzahl der Songs pro Tag](songs_per_day_in_week.png)\n")
     
     activity_by_quarter = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
     days_by_quarter = defaultdict(lambda: defaultdict(set))
@@ -240,6 +243,50 @@ def analyse_activity_by_time(data, output_file, output_path):
 
         append_md(output_file, f"### Hörverhalten nach Uhrzeit – {start_str} bis {end_str}\n"
                                 f"![Songs pro Stunde – {quarter}](songs_per_hour_{quarter}.png)\n")
+
+def analyse_top_songs(data, output_file):
+    print("📊 Analysiere Top-Songs...")
+    append_md(output_file, "## Top-Songs nach Monaten")
+
+    # Songs nach Monaten gruppieren
+    top_songs_per_month = defaultdict(list)
+    for entry in data:
+        spotify_data = entry.get('spotify_data', {})
+        ts = spotify_data.get('ts')
+        if not ts or spotify_data.get('ms_played', 0) < MIN_PLAY_DURATION:
+            continue
+        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+        month = date.strftime("%Y-%m")
+        if not any(song["spotify_data"]["spotify_track_uri"] == entry["spotify_data"]["spotify_track_uri"] for song in top_songs_per_month[month]):
+            entry["times_played"] = 1
+            top_songs_per_month[month].append(entry)
+        else:
+            for song in top_songs_per_month[month]:
+                if song["spotify_data"]["spotify_track_uri"] == entry["spotify_data"]["spotify_track_uri"]:
+                    song["times_played"] += 1
+                    break
+
+    for month in sorted(top_songs_per_month.keys()):
+        songs = top_songs_per_month[month]
+        # Sortiere Songs nach Anzahl der Plays
+        songs.sort(key=lambda x: x["times_played"], reverse=True)
+
+        # Nimm die Top 10 Songs
+        top_songs = songs[:25]
+
+        append_md(output_file, f"### Top-Songs in {month}")
+
+        i = 0
+        append_md(output_file, "##### 1 bis 10")
+        for song in top_songs:
+            if i == 10: append_md(output_file, "##### 11 bis 25")
+            i+=1
+            track_data = song.get('spotify_data', {})
+            track_name = track_data.get('master_metadata_track_name', 'Unbekannt')
+            artist_name = track_data.get('master_metadata_album_artist_name', 'Unbekannt')
+            times_played = song.get('times_played', 0)
+            append_md(output_file, f"{i}. **{track_name}** von {artist_name} – {times_played} mal gehört")
+        append_md(output_file, "\n")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
