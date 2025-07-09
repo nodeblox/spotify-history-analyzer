@@ -208,3 +208,9 @@ __marimo__/
 
 # User-specific files
 userdata/
+output/
+
+# Obsidian
+#  Obsidian is a note-taking and knowledge management application.
+#  The following ignores the `.obsidian` directory, which contains user-specific settings and plugins
+.obsidian/
