@@ -60,6 +60,11 @@ def analyse_general(data, output_file):
     total_duration = sum(entry.get('spotify_data', {}).get('ms_played', 0) for entry in data) / 1000  # in Sekunden
     total_duration_hours = total_duration / 3600
     total_duration_days = total_duration_hours / 24
+    different_songs = set()
+    for entry in data:
+        track_uri = entry.get('spotify_data', {}).get('spotify_track_uri')
+        if track_uri:
+            different_songs.add(track_uri)
 
     start_date = datetime.strptime(data[0].get('spotify_data', {}).get('ts'), '%Y-%m-%dT%H:%M:%SZ').date()
     end_date = datetime.strptime(data[-1].get('spotify_data', {}).get('ts'), '%Y-%m-%dT%H:%M:%SZ').date()
@@ -78,6 +83,7 @@ def analyse_general(data, output_file):
                             f"- **Anzahl der Tage (mit Höraktivität):** {len(days_with_activity)}\n"
                             f"- **Anzahl der gehörten Songs:** {total_songs}\n"
                             f"- **Anzahl der gehörten Songs mit mindestens {(MIN_PLAY_DURATION / 1000):.0f} Sekunden Hördauer:** {songs_with_min_duration}\n"
+                            f"- **Anzahl der unterschiedlichen Songs:** {len(different_songs)}\n"
                             f"- **Gesamthördauer:** {total_duration_days:.2f} Tage ({total_duration_hours:.2f} Stunden) ({total_duration / 60:.2f} Minuten)\n"
                             f"- **Durchschnittliche Hördauer pro Tag:** {total_duration / days_count / 60:.2f} Minuten\n"
                             f"- **Durchschnittliche Hördauer pro Tag (mit Höraktivität):** {total_duration / len(days_with_activity)/60:.2f} Minuten\n"
@@ -120,7 +126,6 @@ def analyse_activity_by_time(data, output_file, output_path):
     plt.close()
 
     append_md(output_file, "### Höraktivität pro Monat\n"
-                            "Dieses Diagramm zeigt die Gesamtzahl der gehörten Songs pro Monat.\n"
                             "![Songs pro Monat](songs_per_month.png)\n")
 
     # Dictionaries für Gesamtanzahl & Vorkommen des Wochentags
