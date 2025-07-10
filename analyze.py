@@ -21,6 +21,8 @@ def main(input_filename):
     input_path = os.path.join("userdata", input_filename)
     output_path = os.path.join("output", input_filename.replace(".json", ""))
     os.makedirs(output_path, exist_ok=True)
+    os.makedirs(os.path.join(output_path, "img"), exist_ok=True)
+    os.makedirs(os.path.join(output_path, "songs"), exist_ok=True)
     output_file = os.path.join("output", input_filename.replace(".json", ""), input_filename.replace(".json", ".md"))
     print(f"📂 Lese Daten aus: {input_path}")
     data = load_data(input_path)
@@ -121,12 +123,12 @@ def analyse_activity_by_time(data, output_file, output_path):
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
 
-    chart_path = os.path.join(output_path, "songs_per_month.png")
+    chart_path = os.path.join(output_path, "img", "songs_per_month.png")
     plt.savefig(chart_path, bbox_inches='tight', pad_inches=0.5)
     plt.close()
 
     append_md(output_file, "### Höraktivität pro Monat\n"
-                            "![Songs pro Monat](songs_per_month.png)\n")
+                            "![Songs pro Monat](img/songs_per_month.png)\n")
 
     # Dictionaries für Gesamtanzahl & Vorkommen des Wochentags
     total_songs = defaultdict(int)
@@ -168,13 +170,13 @@ def analyse_activity_by_time(data, output_file, output_path):
     plt.xticks(rotation=45)
     plt.tight_layout()
 
-    chart_path = os.path.join(output_path, "songs_per_day_in_week.png")
+    chart_path = os.path.join(output_path, "img", "songs_per_day_in_week.png")
     plt.savefig(chart_path, bbox_inches='tight', pad_inches=0.5)
     plt.close()
 
     append_md(output_file, f"### Hörverhalten nach Wochentag\n"
                             f"Dies zeigt die **durchschnittliche** Anzahl Songs pro Tag des jeweiligen Wochentags.\n"
-                            f"![Anzahl der Songs pro Tag](songs_per_day_in_week.png)\n")
+                            f"![Anzahl der Songs pro Tag](img/songs_per_day_in_week.png)\n")
     
     activity_by_quarter = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
     days_by_quarter = defaultdict(lambda: defaultdict(set))
@@ -242,12 +244,12 @@ def analyse_activity_by_time(data, output_file, output_path):
         plt.legend()
         plt.tight_layout()
 
-        chart_path = os.path.join(output_path, f"songs_per_hour_{quarter}.png")
+        chart_path = os.path.join(output_path, "img", f"songs_per_hour_{quarter}.png")
         plt.savefig(chart_path, bbox_inches='tight', pad_inches=0.5)
         plt.close()
 
         append_md(output_file, f"### Hörverhalten nach Uhrzeit – {start_str} bis {end_str}\n"
-                                f"![Songs pro Stunde – {quarter}](songs_per_hour_{quarter}.png)\n")
+                                f"![Songs pro Stunde – {quarter}](img/songs_per_hour_{quarter}.png)\n")
 
 def analyse_top_songs(data, output_file):
     print("📊 Analysiere Top-Songs...")
