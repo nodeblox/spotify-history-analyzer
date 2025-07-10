@@ -175,7 +175,6 @@ def analyse_activity_by_time(data, output_file, output_path):
     plt.close()
 
     append_md(output_file, f"### Hörverhalten nach Wochentag\n"
-                            f"Dies zeigt die **durchschnittliche** Anzahl Songs pro Tag des jeweiligen Wochentags.\n"
                             f"![Anzahl der Songs pro Tag](img/songs_per_day_in_week.png)\n")
     
     activity_by_quarter = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
