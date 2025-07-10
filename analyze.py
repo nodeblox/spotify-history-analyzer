@@ -17,6 +17,7 @@ def main(input_filename):
     os.makedirs(output_path, exist_ok=True)
     os.makedirs(os.path.join(output_path, "img"), exist_ok=True)
     os.makedirs(os.path.join(output_path, "songs"), exist_ok=True)
+    os.makedirs(os.path.join(output_path, "tags"), exist_ok=True)
     output_file = os.path.join("output", input_filename.replace(".json", ""), input_filename.replace(".json", ".md"))
     print(f"📂 Lese Daten aus: {input_path}")
     data = load_data(input_path)
@@ -30,6 +31,7 @@ def main(input_filename):
     analyse_general(data, output_file)
     analyse_activity_by_time(data, output_file, output_path)
     analyse_top_songs(data, output_file, output_path)
+    analyse_top_artists(data, output_file, output_path)
 
 def to_ascii(text):
     kks = kakasi()
@@ -42,6 +44,67 @@ def to_ascii(text):
 def html_to_md_links(text):
     # Regulärer Ausdruck zum Erkennen von <a href="...">...</a>
     return re.sub(r'<a\s+href=["\'](.*?)["\'].*?>(.*?)<\/a>', r'[\2](\1)', text)
+
+def sanitize_filename(text):
+    # Verbotene Zeichen ersetzen durch '_'
+    return re.sub(r'[<>:"/\\|?*\n\r\t]', '_', text).strip()
+
+def generate_songdata_file(song, output_path, processed_songfiles=set()):
+    track_data = song.get('spotify_data', {})
+    lastfm_data = song.get("lastfm_data", {"track": None})["track"]
+
+    if (
+        lastfm_data is not None
+        and lastfm_data.get("name") is not None
+        and track_data["spotify_track_uri"] not in processed_songfiles
+    ):
+        processed_songfiles.add(track_data["spotify_track_uri"])
+        songdata_file = os.path.join(
+            output_path, "songs", track_data["spotify_track_uri"][14:] + ".md"
+        )
+        clear_md(songdata_file)
+
+        image_list = lastfm_data.get("album", {}).get("image", [])
+        extralarge_image = next(
+            (item.get("#text") for item in image_list if item.get("size") == "extralarge"),
+            None,
+        )
+
+        append_md(
+            songdata_file,
+            f'# {lastfm_data["name"]}'
+        )
+
+        if lastfm_data.get("album", {}):
+            append_md(songdata_file, f"from Album **[{lastfm_data['album']['title']}]({lastfm_data['album']['url']})**")
+
+        if lastfm_data.get("album", {}):
+            append_md(songdata_file, f"by **[{lastfm_data['artist']['name']}]({lastfm_data['artist']['url']})**")
+
+        duration_ms = int(lastfm_data.get('duration', '0'))
+        duration_string = f"{duration_ms // 60000}min, {((duration_ms%60000)/1000):.0f}sec"
+        append_md(songdata_file, f"**Duration:** {duration_string if duration_ms > 0 else 'unknown'}")
+
+        if extralarge_image:
+            append_md(
+                songdata_file,
+                f'\n![{lastfm_data["album"]["title"]}]({extralarge_image})',
+            )
+
+        song_wiki = lastfm_data.get("wiki", None)
+        if song_wiki is not None:
+            append_md(songdata_file, "### Wiki\n"
+                                    + html_to_md_links(song_wiki['content'])
+                                    + f"\n\n(**Published:** {song_wiki['published']})")
+        else:
+            append_md(songdata_file, f'\n[{lastfm_data["url"]}]({lastfm_data["url"]})\n',)
+
+        tags = lastfm_data.get('toptags', {}).get('tag', [])
+        if len(tags) > 0:
+            append_md(songdata_file, "### Tags / Genres")
+            for tag in tags:
+                append_md(songdata_file, f"- [[../tags/{sanitize_filename(tag['name'])}.md|{tag['name']}]]")
+
 
 def load_data(file_path):
     with open(file_path, 'r', encoding='utf-8') as file:
@@ -264,10 +327,12 @@ def analyse_activity_by_time(data, output_file, output_path):
 
 def analyse_top_songs(data, output_file, output_path):
     print("📊 Analysiere Top-Songs...")
-    append_md(output_file, "## Top-Songs nach Monaten")
+    append_md(output_file, "## Top-Songs")
 
     # Songs nach Monaten gruppieren
     top_songs_per_month = defaultdict(list)
+    top_songs_full_time = []
+
     for entry in data:
         spotify_data = entry.get('spotify_data', {})
         ts = spotify_data.get('ts')
@@ -275,6 +340,7 @@ def analyse_top_songs(data, output_file, output_path):
             continue
         date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
         month = date.strftime("%Y-%m")
+
         if not any(song["spotify_data"]["spotify_track_uri"] == entry["spotify_data"]["spotify_track_uri"] for song in top_songs_per_month[month]):
             entry["times_played"] = 1
             top_songs_per_month[month].append(entry)
@@ -284,7 +350,49 @@ def analyse_top_songs(data, output_file, output_path):
                     song["times_played"] += 1
                     break
 
+        if not any(song["spotify_data"]["spotify_track_uri"] == entry["spotify_data"]["spotify_track_uri"] for song in top_songs_full_time):
+            entry["times_played"] = 1
+            top_songs_full_time.append(entry)
+        else:
+            for song in top_songs_full_time:
+                if song["spotify_data"]["spotify_track_uri"] == entry["spotify_data"]["spotify_track_uri"]:
+                    song["times_played"] += 1
+                    break
+
     processed_songfiles = set()
+
+    top_songs_full_time.sort(key=lambda x: x["times_played"], reverse=True)
+    top_songs_full_time_top_25 = top_songs_full_time[:25]
+
+    append_md(output_file, f"### Top-Songs (gesamt)")
+
+    i = 0
+    append_md(output_file, "##### 1 bis 10")
+    for song in top_songs_full_time_top_25:
+        if i == 10: append_md(output_file, "##### 11 bis 25")
+        i+=1
+        track_data = song.get('spotify_data', {})
+        lastfm_data = song.get("lastfm_data", {"track": None})["track"]
+        
+        generate_songdata_file(song, output_path, processed_songfiles)
+
+        track_name = track_data.get("master_metadata_track_name", "Unbekannt")
+        artist_name = track_data.get("master_metadata_album_artist_name", "Unbekannt")
+        times_played = song.get("times_played", 0)
+        if (
+            lastfm_data is not None
+            and lastfm_data.get("name") is not None
+        ):
+            link = f'[[./songs/{track_data["spotify_track_uri"][14:]}.md|{track_name}]]'
+        else:
+            link = track_name
+
+        append_md(
+            output_file,
+            f"{i}. **{link}** von {artist_name} – **{times_played}** mal gehört",
+        )
+    append_md(output_file, "\n")
+
     for month in sorted(top_songs_per_month.keys()):
         songs = top_songs_per_month[month]
         # Sortiere Songs nach Anzahl der Plays
@@ -293,61 +401,18 @@ def analyse_top_songs(data, output_file, output_path):
         # Nimm die Top 10 Songs
         top_songs = songs[:25]
 
-        append_md(output_file, f"### Top-Songs in {month}")
+        append_md(output_file, f"### Top-Songs im Monat {month}")
 
         i = 0
         append_md(output_file, "##### 1 bis 10")
         for song in top_songs:
             if i == 10: append_md(output_file, "##### 11 bis 25")
             i+=1
+
             track_data = song.get('spotify_data', {})
-
             lastfm_data = song.get("lastfm_data", {"track": None})["track"]
-            if (
-                lastfm_data is not None
-                and lastfm_data.get("name") is not None
-                and track_data["spotify_track_uri"] not in processed_songfiles
-            ):
-                processed_songfiles.add(track_data["spotify_track_uri"])
-                songdata_file = os.path.join(
-                    output_path, "songs", track_data["spotify_track_uri"][14:] + ".md"
-                )
-                clear_md(songdata_file)
-
-                image_list = lastfm_data.get("album", {}).get("image", [])
-                extralarge_image = next(
-                    (item.get("#text") for item in image_list if item.get("size") == "extralarge"),
-                    None,
-                )
-
-                append_md(
-                    songdata_file,
-                    f'# {lastfm_data["name"]}'
-                )
-
-                if lastfm_data.get("album", {}):
-                    append_md(songdata_file, f"from Album **[{lastfm_data['album']['title']}]({lastfm_data['album']['url']})**")
-
-                if lastfm_data.get("album", {}):
-                    append_md(songdata_file, f"by **[{lastfm_data['artist']['name']}]({lastfm_data['artist']['url']})**")
-
-                duration_ms = int(lastfm_data.get('duration', '0'))
-                duration_string = f"{duration_ms // 60000}min, {((duration_ms%60000)/1000):.0f}sec"
-                append_md(songdata_file, f"**Duration:** {duration_string if duration_ms > 0 else 'unknown'}")
-
-                if extralarge_image:
-                    append_md(
-                        songdata_file,
-                        f'\n![{lastfm_data["album"]["title"]}]({extralarge_image})',
-                    )
-
-                song_wiki = lastfm_data.get("wiki", None)
-                if song_wiki is not None:
-                    append_md(songdata_file, "### Wiki\n"
-                                            + html_to_md_links(song_wiki['content'])
-                                            + f"\n\n(**Published:** {song_wiki['published']})")
-                else:
-                    append_md(songdata_file, f'\n[{lastfm_data["url"]}]({lastfm_data["url"]})\n',)
+            
+            generate_songdata_file(song, output_path, processed_songfiles)
 
             track_name = track_data.get("master_metadata_track_name", "Unbekannt")
             artist_name = track_data.get("master_metadata_album_artist_name", "Unbekannt")
@@ -357,15 +422,62 @@ def analyse_top_songs(data, output_file, output_path):
                 lastfm_data is not None
                 and lastfm_data.get("name") is not None
             ):
-                link = f'[[songs/{track_data["spotify_track_uri"][14:]}.md|{track_name}]]'
+                link = f'[[./songs/{track_data["spotify_track_uri"][14:]}.md|{track_name}]]'
             else:
                 link = track_name
 
             append_md(
                 output_file,
-                f"{i}. **{link}** von {artist_name} – {times_played} mal gehört",
+                f"{i}. **{link}** von {artist_name} – **{times_played}** mal gehört",
             )
         append_md(output_file, "\n")
+
+def analyse_top_artists(data, output_file, output_path):
+    print("📊 Analysiere Top-Artists...")
+    append_md(output_file, "## Top-Artists")
+
+    artist_times = defaultdict(int)
+    artist_urls = defaultdict(str)
+    artist_times_by_month = defaultdict(lambda: defaultdict(int)) # Monat → Künstler → Zeit
+
+    for song in data:
+        artist = song['spotify_data'].get("master_metadata_album_artist_name", 'unknown')
+        artist_urls[artist] = song.get('lastfm_data', {'track': {}})['track'].get('artist', {}).get('url', None)
+        artist_times[artist] += song['spotify_data']['ms_played']
+        ts = song['spotify_data']['ts']
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+        month = dt.strftime("%Y-%m")
+        artist_times_by_month[month][artist] += song['spotify_data']['ms_played']
+
+    artist_times_sorted = sorted(artist_times.items(), key=lambda x: x[1], reverse=True)
+
+    top_artists = artist_times_sorted[:40]
+
+    append_md(output_file, f"### Top-Artists (gesamt)")
+
+    i = 0
+    append_md(output_file, "##### 1 bis 10")
+    for artist, played_ms in top_artists:
+        if artist == "unknown": continue
+        if i == 10: append_md(output_file, "##### 11 bis 25")
+        if i == 25: append_md(output_file, "##### 26 bis 40")
+        i+=1
+        link = f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] is not None else artist
+        append_md(output_file, f"{i}. **{link}** mit **{(played_ms / 1000 / 60 / 60):.2f} Stunden** Spielzeit")
+
+    # Monatliche Auswertung
+    for month in sorted(artist_times_by_month):
+        append_md(output_file, f"\n### Top-Artists im Monat {month}")
+        monthly_sorted = sorted(
+            artist_times_by_month[month].items(), key=lambda x: x[1], reverse=True
+        )[:10]
+
+        for idx, (artist, played_ms) in enumerate(monthly_sorted, start=1):
+            if artist == "unknown":
+                continue
+            link = f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
+            stunden = played_ms / 1000 / 60 / 60
+            append_md(output_file, f"{idx}. **{link}** – **{stunden:.2f} Stunden**")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
