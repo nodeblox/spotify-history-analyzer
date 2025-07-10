@@ -34,7 +34,26 @@ def to_ascii(text):
     kks.setMode('K', 'a')  # Katakana zu ascii
     kks.setMode('H', 'a')  # Hiragana zu ascii
     converter = kks.getConverter()
-    return converter.do(text)
+    converted = converter.do(text)
+
+    # Ideographische Satzzeichen ersetzen
+    replacements = {
+        '、': ',',   # ideographisches Komma
+        '。': '.',   # ideographischer Punkt
+        '，': ',',   # voller Breite Komma
+        '．': '.',   # voller Breite Punkt
+        '：': ':',   # voller Breite Doppelpunkt
+        '；': ';',   # voller Breite Semikolon
+        '？': '?',   # voller Breite Fragezeichen
+        '！': '!',   # voller Breite Ausrufezeichen
+        '〜': '~',   # Wellenlinie
+        '・': '-',   # Mittelpunkt (kann man zu Bindestrich machen)
+    }
+
+    for orig, repl in replacements.items():
+        converted = converted.replace(orig, repl)
+
+    return converted
 
 def html_to_md_links(text):
     # Regulärer Ausdruck zum Erkennen von <a href="...">...</a>
@@ -43,4 +62,4 @@ def html_to_md_links(text):
 def sanitize_filename(text):
     text = to_ascii(text)
     # Verbotene Zeichen ersetzen durch '_'
-    return re.sub(r'[<>、。:"/\\|?*\n\r\t]', '_', text).strip()
+    return re.sub(r'[<>:"/\\|?*\n\r\t]', '_', text).strip()

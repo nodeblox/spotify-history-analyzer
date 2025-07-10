@@ -439,6 +439,40 @@ def analyse_top_artists(data, output_file, output_path):
             link = f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
             stunden = played_ms / 1000 / 60 / 60
             utils.append_md(output_file, f"{idx}. **{link}** – **{stunden:.2f} Stunden**")
+    
+        # --- Diagramm: Top 10 Artists pro Monat (Stunden gehört) ---
+    import matplotlib.pyplot as plt
+
+    # Alle Monate chronologisch sortieren
+    all_months = sorted(artist_times_by_month.keys())
+    # Top 10 Artists nach Gesamtspielzeit
+    top10_artists = [artist for artist, _ in top_artists[:10]]
+
+    # Für jeden Artist: Liste der gehörten Stunden pro Monat (0 wenn nicht vorhanden)
+    artist_month_hours = {artist: [] for artist in top10_artists}
+    for month in all_months:
+        for artist in top10_artists:
+            ms = artist_times_by_month[month].get(artist, 0)
+            hours = ms / 1000 / 60 / 60
+            artist_month_hours[artist].append(hours)
+
+    plt.figure(figsize=(14, 7))
+    for artist in top10_artists:
+        plt.plot(all_months, artist_month_hours[artist], marker='o', label=utils.to_ascii(artist))
+
+    plt.title("Top 10 Artists: Gehört pro Monat (Stunden)")
+    plt.xlabel("Monat")
+    plt.ylabel("Gehörte Stunden")
+    plt.xticks(rotation=45)
+    plt.legend()
+    plt.tight_layout()
+
+    chart_path = os.path.join(output_path, "img", "top10_artists_per_month.png")
+    plt.savefig(chart_path, bbox_inches='tight', pad_inches=0.5)
+    plt.close()
+
+    utils.append_md(output_file, "### Top 10 Artists – Gehört pro Monat\n"
+                                "![Top 10 Artists pro Monat](./img/top10_artists_per_month.png)\n")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
