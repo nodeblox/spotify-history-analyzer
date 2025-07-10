@@ -29,7 +29,7 @@ def analyse(data, output_file, output_path):
 
     for song in data:
         artist = song['spotify_data'].get("master_metadata_album_artist_name", 'unknown')
-        artist_urls[artist] = song.get('lastfm_data', {'track': {}})['track'].get('artist', {}).get('url', None)
+        artist_urls[artist] = (song.get('lastfm_data', {}) or {}).get('track', {}).get('artist', {}).get('url', None)
         artist_times[artist] += song['spotify_data']['ms_played']
         ts = song['spotify_data']['ts']
         dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
@@ -116,7 +116,7 @@ def get_most_heared_songs(data, artist, artist_filepath, output_path):
     song_stats = {}
     for entry in data:
         track_data = entry.get("spotify_data", {})
-        lastfm_data = entry.get("lastfm_data", {"track": None})["track"]
+        lastfm_data = (entry.get("lastfm_data", {}) or {}).get("track", {})
         artist_name = track_data.get("master_metadata_album_artist_name", "")
         track_uri = track_data.get("spotify_track_uri")
         track_name = track_data.get("master_metadata_track_name", "Unbekannt")

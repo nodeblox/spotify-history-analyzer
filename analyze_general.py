@@ -36,7 +36,7 @@ def main(input_filename):
 
 def generate_songdata_file(song, output_path, processed_songfiles=set()):
     track_data = song.get('spotify_data', {})
-    lastfm_data = song.get("lastfm_data", {"track": None})["track"]
+    lastfm_data = song.get("lastfm_data", {}).get("track")
 
     if (
         lastfm_data is not None
@@ -371,7 +371,7 @@ def analyse_top_songs(data, output_file, output_path):
             i+=1
 
             track_data = song.get('spotify_data', {})
-            lastfm_data = song.get("lastfm_data", {"track": None})["track"]
+            lastfm_data = song.get("lastfm_data", {}).get("track")
             
             generate_songdata_file(song, output_path, processed_songfiles)
 
@@ -402,8 +402,9 @@ def analyse_top_artists(data, output_file, output_path):
     artist_times_by_month = defaultdict(lambda: defaultdict(int)) # Monat → Künstler → Zeit
 
     for song in data:
+        if song is None: continue
         artist = song['spotify_data'].get("master_metadata_album_artist_name", 'unknown')
-        artist_urls[artist] = song.get('lastfm_data', {'track': {}})['track'].get('artist', {}).get('url', None)
+        artist_urls[artist] = (song.get('lastfm_data', {}) or {}).get("track", {}).get('artist', {}).get('url', None)
         artist_times[artist] += song['spotify_data']['ms_played']
         ts = song['spotify_data']['ts']
         dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
