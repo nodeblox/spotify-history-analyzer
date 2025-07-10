@@ -6,16 +6,10 @@ import os
 from datetime import datetime, timedelta
 from pykakasi import kakasi
 from collections import defaultdict
+import time
+import re
 
 MIN_PLAY_DURATION = 20000  # in ms
-
-def to_ascii(text):
-    kks = kakasi()
-    kks.setMode('J', 'a')  # Japanese zu ascii (Romaji)
-    kks.setMode('K', 'a')  # Katakana zu ascii
-    kks.setMode('H', 'a')  # Hiragana zu ascii
-    converter = kks.getConverter()
-    return converter.do(text)
 
 def main(input_filename):
     input_path = os.path.join("userdata", input_filename)
@@ -35,25 +29,43 @@ def main(input_filename):
     append_md(output_file, f"# Analyse")
     analyse_general(data, output_file)
     analyse_activity_by_time(data, output_file, output_path)
-    analyse_top_songs(data, output_file)
+    analyse_top_songs(data, output_file, output_path)
+
+def to_ascii(text):
+    kks = kakasi()
+    kks.setMode('J', 'a')  # Japanese zu ascii (Romaji)
+    kks.setMode('K', 'a')  # Katakana zu ascii
+    kks.setMode('H', 'a')  # Hiragana zu ascii
+    converter = kks.getConverter()
+    return converter.do(text)
+
+def html_to_md_links(text):
+    # Regulärer Ausdruck zum Erkennen von <a href="...">...</a>
+    return re.sub(r'<a\s+href=["\'](.*?)["\'].*?>(.*?)<\/a>', r'[\2](\1)', text)
 
 def load_data(file_path):
     with open(file_path, 'r', encoding='utf-8') as file:
         return json.load(file)
-    
-def append_md(filename, text=""):
-    """
-    Hängt den gegebenen Text an eine Markdown-Datei an.
 
-    :param filename: Pfad zur Markdown-Datei
-    :param text: Text, der angehängt werden soll (String)
-    """
-    with open(filename, 'a', encoding='utf-8') as f:
-        f.write(text + '\n')
+def append_md(filename, text=""):
+    try:
+        with open(filename, 'a', encoding='utf-8') as f:
+            f.write(text + '\n')
+        for _ in range(50):
+            if os.path.exists(filename):
+                break
+            time.sleep(0.05)
+    except Exception as e:
+        print(f"Fehler beim Anhängen an die Datei '{filename}': {e}")
 
 def clear_md(filename):
-    with open(filename, 'w', encoding='utf-8') as f:
-        pass  # Datei wird geöffnet und sofort geschlossen – Inhalt ist jetzt leer
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            pass
+        time.sleep(0.02)
+    except Exception as e:
+        print(f"Fehler beim Leeren der Datei '{filename}': {e}")
+
 
 def analyse_general(data, output_file):
     print("📊 Analysiere allgemeine Statistiken...")
@@ -250,7 +262,7 @@ def analyse_activity_by_time(data, output_file, output_path):
         append_md(output_file, f"### Hörverhalten nach Uhrzeit – {start_str} bis {end_str}\n"
                                 f"![Songs pro Stunde – {quarter}](img/songs_per_hour_{quarter}.png)\n")
 
-def analyse_top_songs(data, output_file):
+def analyse_top_songs(data, output_file, output_path):
     print("📊 Analysiere Top-Songs...")
     append_md(output_file, "## Top-Songs nach Monaten")
 
@@ -272,6 +284,7 @@ def analyse_top_songs(data, output_file):
                     song["times_played"] += 1
                     break
 
+    processed_songfiles = set()
     for month in sorted(top_songs_per_month.keys()):
         songs = top_songs_per_month[month]
         # Sortiere Songs nach Anzahl der Plays
@@ -288,10 +301,70 @@ def analyse_top_songs(data, output_file):
             if i == 10: append_md(output_file, "##### 11 bis 25")
             i+=1
             track_data = song.get('spotify_data', {})
-            track_name = track_data.get('master_metadata_track_name', 'Unbekannt')
-            artist_name = track_data.get('master_metadata_album_artist_name', 'Unbekannt')
-            times_played = song.get('times_played', 0)
-            append_md(output_file, f"{i}. **{track_name}** von {artist_name} – {times_played} mal gehört")
+
+            lastfm_data = song.get("lastfm_data", {"track": None})["track"]
+            if (
+                lastfm_data is not None
+                and lastfm_data.get("name") is not None
+                and track_data["spotify_track_uri"] not in processed_songfiles
+            ):
+                processed_songfiles.add(track_data["spotify_track_uri"])
+                songdata_file = os.path.join(
+                    output_path, "songs", track_data["spotify_track_uri"][14:] + ".md"
+                )
+                clear_md(songdata_file)
+
+                image_list = lastfm_data.get("album", {}).get("image", [])
+                extralarge_image = next(
+                    (item.get("#text") for item in image_list if item.get("size") == "extralarge"),
+                    None,
+                )
+
+                append_md(
+                    songdata_file,
+                    f'# {lastfm_data["name"]}'
+                )
+
+                if lastfm_data.get("album", {}):
+                    append_md(songdata_file, f"from Album **[{lastfm_data['album']['title']}]({lastfm_data['album']['url']})**")
+
+                if lastfm_data.get("album", {}):
+                    append_md(songdata_file, f"by **[{lastfm_data['artist']['name']}]({lastfm_data['artist']['url']})**")
+
+                duration_ms = int(lastfm_data.get('duration', '0'))
+                duration_string = f"{duration_ms // 60000}min, {((duration_ms%60000)/1000):.0f}sec"
+                append_md(songdata_file, f"**Duration:** {duration_string if duration_ms > 0 else 'unknown'}")
+
+                if extralarge_image:
+                    append_md(
+                        songdata_file,
+                        f'\n![{lastfm_data["album"]["title"]}]({extralarge_image})',
+                    )
+
+                song_wiki = lastfm_data.get("wiki", None)
+                if song_wiki is not None:
+                    append_md(songdata_file, "### Wiki\n"
+                                            + html_to_md_links(song_wiki['content'])
+                                            + f"\n\n(**Published:** {song_wiki['published']})")
+                else:
+                    append_md(songdata_file, f'\n[{lastfm_data["url"]}]({lastfm_data["url"]})\n',)
+
+            track_name = track_data.get("master_metadata_track_name", "Unbekannt")
+            artist_name = track_data.get("master_metadata_album_artist_name", "Unbekannt")
+            times_played = song.get("times_played", 0)
+
+            if (
+                lastfm_data is not None
+                and lastfm_data.get("name") is not None
+            ):
+                link = f'[[songs/{track_data["spotify_track_uri"][14:]}.md|{track_name}]]'
+            else:
+                link = track_name
+
+            append_md(
+                output_file,
+                f"{i}. **{link}** von {artist_name} – {times_played} mal gehört",
+            )
         append_md(output_file, "\n")
 
 if __name__ == "__main__":
