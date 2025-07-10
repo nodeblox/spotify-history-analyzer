@@ -57,7 +57,8 @@ def main(input_filename="spotify_history.json"):
     input_path = os.path.join("userdata", input_filename)
     output_filename = f"detailed_{input_filename}"
     output_path = os.path.join("userdata", output_filename)
-    cache_path = os.path.join(".cache")
+    os.makedirs(os.path.join(".cache"), exist_ok=True)
+    cache_path = os.path.join(".cache", "songdata.cache")
 
     if not os.path.exists(input_path):
         print(f"❌ Datei nicht gefunden: {input_path}")
@@ -106,6 +107,8 @@ def main(input_filename="spotify_history.json"):
             time.sleep(0.3)  # API-Rate-Limit
     writer.close()
     print(f"\n✅ Gespeichert in: {output_path}")
+
+    return output_path
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
