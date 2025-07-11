@@ -1,102 +1,102 @@
 import os
 import sys
-import utils
+import json
+import time
+import sqlite3
+import requests
+import urllib.parse
 from collections import defaultdict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
-import json
-import requests
-import urllib.parse
-import time
-import sqlite3
+
+import utils
 
 # === Datenbank initialisieren ===
-os.makedirs(os.path.join(".cache"), exist_ok=True)
-conn = sqlite3.connect("./.cache/cache.db")
+CACHE_DIR = ".cache"
+DB_PATH = os.path.join(CACHE_DIR, "cache.db")
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+conn = sqlite3.connect(DB_PATH)
 conn.row_factory = sqlite3.Row
 cur = conn.cursor()
-# Tabelle erstellen
-cur.execute("CREATE TABLE IF NOT EXISTS songdata (id STRING PRIMARY KEY, json JSON)")
-conn.commit()
+
+# Tabellen erstellen
+cur.execute("CREATE TABLE IF NOT EXISTS songdata (id TEXT PRIMARY KEY, json JSON)")
 cur.execute("CREATE TABLE IF NOT EXISTS artistdata (artist_name TEXT PRIMARY KEY, json JSON)")
 conn.commit()
 
-
+# === Konfiguration laden ===
 load_dotenv()
 TIMEZONE = os.getenv("TIMEZONE")
 
-def main(input_filename):
+
+def main(input_filename: str):
     input_path = os.path.join("userdata", input_filename)
-    output_path = os.path.join("output", input_filename.replace(".json", ""))
-    os.makedirs(os.path.join(output_path, "artists"), exist_ok=True)
-    output_file = os.path.join("output", input_filename.replace(".json", ""), "artists.md")
+    output_dir = os.path.join("output", input_filename.replace(".json", ""))
+    os.makedirs(os.path.join(output_dir, "artists"), exist_ok=True)
+
+    output_file = os.path.join(output_dir, "artists.md")
 
     print(f"📂 Lese Daten aus: {input_path}")
     data = utils.load_data(input_path)
 
     utils.clear_md(output_file)
-    analyse(data, output_file, output_path)
+    analyse(data, output_file, output_dir)
 
-def analyse(data, output_file, output_path):
+
+def analyse(data, output_file, output_dir):
     print("📊 Analysiere Artists...")
 
     artist_times = defaultdict(int)
-    artist_urls = defaultdict(str)
+    artist_urls = {}
 
     for song in data:
         artist = song.get("master_metadata_album_artist_name")
         if not artist:
             continue
-        
-        cur.execute("SELECT * FROM songdata WHERE id = ?", [song.get("spotify_track_uri")])
+
+        track_id = song.get("spotify_track_uri")
+        cur.execute("SELECT json FROM songdata WHERE id = ?", [track_id])
         row = cur.fetchone()
-        lastfm_data = json.loads(row["json"]).get("track") if row else None
-        artist_urls[artist] = lastfm_data['artist']['url'] if lastfm_data else None
-        artist_times[artist] += song['ms_played']
-        # ts = song['ts']
-        # dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
 
-    artist_times_sorted = sorted(artist_times.items(), key=lambda x: x[1], reverse=True)
+        if row:
+            lastfm_data = json.loads(row["json"]).get("track")
+            if artist not in artist_urls and lastfm_data:
+                artist_urls[artist] = lastfm_data.get("artist", {}).get("url")
+        artist_times[artist] += song.get("ms_played", 0)
 
-    top_artists = artist_times_sorted[:500]
+    top_artists = sorted(artist_times.items(), key=lambda x: x[1], reverse=True)[:500]
 
-    utils.append_md(output_file, f"### Top 500 Artists")
+    utils.append_md(output_file, "### Top 500 Artists\n")
 
-    i = 0
-    for artist, played_ms in top_artists:
-        if not artist:
-            continue
-        i += 1
+    for i, (artist, played_ms) in enumerate(top_artists, start=1):
         filename = utils.sanitize_filename(artist) + ".md"
-        utils.append_md(output_file, f"{i}. **[[./artists/{filename}|{artist}]]** mit **{(played_ms / 1000 / 60 / 60):.2f} Stunden** Spielzeit")
+        playtime_h = played_ms / 1000 / 60 / 60
+        utils.append_md(output_file, f"{i}. **[[./artists/{filename}|{artist}]]** mit **{playtime_h:.2f} Stunden** Spielzeit")
+        get_artist_data(i, data, artist, output_dir, artist_url=artist_urls.get(artist))
 
-        # .md-Datei für den Artist erzeugen
-        get_artist_data(i, data, artist, output_path, artist_url=artist_urls[artist])
 
+def get_artist_data(index, data, artist_name, output_dir, artist_url=None):
+    start = time.time()
 
-def get_artist_data(i, data, artist_name, output_path, artist_url=None):
-    start_processing_ts = time.time()
-    
-    cur.execute("SELECT json FROM artistdata WHERE artist_name = ?", (artist_name,))
+    cur.execute("SELECT json FROM artistdata WHERE artist_name = ?", [artist_name])
     row = cur.fetchone()
 
     if row:
         artist_data = json.loads(row["json"])
         from_cache = True
     else:
-        encoded_artist = urllib.parse.quote(artist_name)
-        url = (
+        api_url = (
             f"https://ws.audioscrobbler.com/2.0/?method=artist.getinfo"
-            f"&api_key={os.getenv('LASTFM_API_KEY')}&artist={encoded_artist}&format=json"
+            f"&api_key={os.getenv('LASTFM_API_KEY')}&artist={urllib.parse.quote(artist_name)}&format=json"
         )
-        response = requests.get(url)
+        response = requests.get(api_url)
         if response.status_code != 200:
-            print(f"❌ Fehler beim Laden von {artist_name}: {response.status_code}")
+            print(f"❌ Fehler beim Laden von {artist_name}: HTTP {response.status_code}")
             return
-        artist_data = response.json()
 
-        # In DB speichern
+        artist_data = response.json()
         cur.execute(
             "INSERT OR REPLACE INTO artistdata (artist_name, json) VALUES (?, ?)",
             (artist_name, json.dumps(artist_data, ensure_ascii=False))
@@ -104,9 +104,9 @@ def get_artist_data(i, data, artist_name, output_path, artist_url=None):
         conn.commit()
         from_cache = False
 
-    # .md Datei schreiben
+    # Markdown-Datei schreiben
     artist_filename = utils.sanitize_filename(artist_name) + ".md"
-    artist_filepath = os.path.join(output_path, "artists", artist_filename)
+    artist_filepath = os.path.join(output_dir, "artists", artist_filename)
 
     summary = artist_data.get("artist", {}).get("bio", {}).get("summary", "Keine Beschreibung verfügbar.")
     summary = utils.html_to_md_links(summary)
@@ -116,37 +116,40 @@ def get_artist_data(i, data, artist_name, output_path, artist_url=None):
     utils.append_md(artist_filepath, f"# {artist_name}")
     if artist_url:
         utils.append_md(artist_filepath, f"[Last.fm-Profil]({artist_url})\n")
-    utils.append_md(artist_filepath, f"**Tags**: " + ", ".join([tag["name"] for tag in tags]) if tags else "Keine Tags gefunden.")
+    if tags:
+        tag_list = ", ".join(tag["name"] for tag in tags)
+        utils.append_md(artist_filepath, f"**Tags**: {tag_list}")
+    else:
+        utils.append_md(artist_filepath, "Keine Tags gefunden.")
     utils.append_md(artist_filepath, "\n" + summary)
 
-    get_most_heared_songs(data, artist_name, artist_filepath, output_path)
+    get_most_heared_songs(data, artist_name, artist_filepath, output_dir)
 
-    print(f"✅ | {str(i).zfill(3)} / 500 | {'📄 (Cache)' if from_cache else '🆕 (API)'}: {artist_name}")
-    
-    end_processing_ts = time.time()
-    sleep_time: float = 0.25 - (end_processing_ts - start_processing_ts)
-    if not from_cache and sleep_time > 0:
-        time.sleep(sleep_time)  # API-Rate-Limit
+    print(f"✅ | {str(index).zfill(3)} / 500 | {'📄 (Cache)' if from_cache else '🆕 (API)'}: {artist_name}")
 
-def get_most_heared_songs(data, artist, artist_filepath, output_path):
+    # API-Rate-Limit beachten
+    elapsed = time.time() - start
+    if not from_cache and elapsed < 0.25:
+        time.sleep(0.25 - elapsed)
+
+
+def get_most_heared_songs(data, artist, artist_filepath, output_dir):
     """
-    Fügt die 25 meistgehörten Songs des gegebenen Künstlers zur Artist-Markdown-Datei hinzu.
+    Fügt die 25 meistgehörten Songs eines Artists zur Markdown-Datei hinzu.
     """
-    from collections import defaultdict
-    import utils
-
-    # Songs des Künstlers sammeln und Playcount zählen
     song_stats = {}
     for entry in data:
-        cur.execute("SELECT * FROM songdata WHERE id = ?", [entry.get("spotify_track_uri")])
-        row = cur.fetchone()
-        lastfm_data = json.loads(row["json"]).get("track") if row else None
-        
         artist_name = entry.get("master_metadata_album_artist_name", "")
         track_uri = entry.get("spotify_track_uri")
         track_name = entry.get("master_metadata_track_name", "Unbekannt")
+
         if artist_name != artist or not track_uri:
             continue
+
+        cur.execute("SELECT json FROM songdata WHERE id = ?", [track_uri])
+        row = cur.fetchone()
+        lastfm_data = json.loads(row["json"]).get("track") if row else None
+
         if track_uri not in song_stats:
             song_stats[track_uri] = {
                 "track_name": track_name,
@@ -156,38 +159,33 @@ def get_most_heared_songs(data, artist, artist_filepath, output_path):
         else:
             song_stats[track_uri]["times_played"] += 1
 
-    # Nach Plays sortieren, Top 25 nehmen
     top_songs = sorted(song_stats.items(), key=lambda x: x[1]["times_played"], reverse=True)[:25]
 
     if not top_songs:
         utils.append_md(artist_filepath, "\n**Keine Songs gefunden.**")
         return
-    
-    i = 0
-    list_md_content = ""
-    list_md_content += "\n### Meistgehörte Songs\n"
-    if len(top_songs) > 10:
-        list_md_content += "##### 1 bis 10\n"
-    for track_uri, song in top_songs:
-        if i == 10: list_md_content += "##### 11 bis 25\n"
-        i+=1
+
+    utils.append_md(artist_filepath, "\n### Meistgehörte Songs\n")
+
+    for i, (track_uri, song) in enumerate(top_songs, start=1):
+        if i == 1:
+            utils.append_md(artist_filepath, "##### 1 bis 10\n")
+            utils.append_md(artist_filepath, "##### 11 bis 25\n")
+        elif i == 11:
+            utils.append_md(artist_filepath, "##### 11 bis 25\n")
+
         track_name = song["track_name"]
         times_played = song["times_played"]
         lastfm_data = song["lastfm_data"]
 
-        path_exists = os.path.exists(os.path.join(output_path, "songs", track_uri[14:] + ".md"))
+        song_path = os.path.join(output_dir, "songs", track_uri[14:] + ".md")
+        link = f'[[../songs/{track_uri[14:]}.md|{track_name}]]' if lastfm_data and os.path.exists(song_path) else track_name
+        utils.append_md(artist_filepath, f"{i}. **{link}** – **{times_played}** mal gehört")
 
-        # Link zur Songdatei, falls lastfm_data vorhanden
-        if lastfm_data is not None and path_exists:
-            link = f'[[../songs/{track_uri[14:]}.md|{track_name}]]'
-        else:
-            link = track_name
-        list_md_content += f"{i}. **{link}** – **{times_played}** mal gehört\n"
-    utils.append_md(artist_filepath, list_md_content)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z. B. detailed_history.json)")
+        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z. B. history.json)")
         sys.exit(1)
-    input_filename = sys.argv[1]
-    main(input_filename)
+
+    main(sys.argv[1])

@@ -251,36 +251,41 @@ def analyse_top_songs(data, output_file, output_path):
     utils.append_md(output_file, "## Top-Songs")
 
     # Songs nach Monaten gruppieren
-    top_songs_per_month = defaultdict(list)
-    top_songs_full_time = []
+    top_songs_per_month = defaultdict(dict)  # Monat -> {spotify_track_uri: song_entry}
+    top_songs_full_time = {}  # spotify_track_uri -> song_entry
 
     for entry in data:
-        spotify_data = entry
-        ts = spotify_data.get('ts')
-        if not ts or spotify_data.get('ms_played', 0) > MIN_PLAY_DURATION or not spotify_data.get('master_metadata_track_name'):
+        ts = entry.get("ts")
+        if (
+            not ts
+            or entry.get("ms_played", 0) < MIN_PLAY_DURATION
+            or not entry.get("master_metadata_track_name")
+        ):
             continue
-        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
+
+        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        date = date.astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
         month = date.strftime("%Y-%m")
 
-        if not any(song["spotify_track_uri"] == entry["spotify_track_uri"] for song in top_songs_per_month[month]):
-            entry["times_played"] = 1
-            top_songs_per_month[month].append(entry)
-        else:
-            for song in top_songs_per_month[month]:
-                if song["spotify_track_uri"] == entry["spotify_track_uri"]:
-                    song["times_played"] += 1
-                    break
+        uri = entry["spotify_track_uri"]
 
-        if not any(song["spotify_track_uri"] == entry["spotify_track_uri"] for song in top_songs_full_time):
-            entry["times_played"] = 1
-            top_songs_full_time.append(entry)
+        # Monatliche Songs
+        if uri not in top_songs_per_month[month]:
+            new_entry = json.loads(json.dumps(entry))  # deepcopy via JSON
+            new_entry["times_played"] = 1
+            top_songs_per_month[month][uri] = new_entry
         else:
-            for song in top_songs_full_time:
-                if song["spotify_track_uri"] == entry["spotify_track_uri"]:
-                    song["times_played"] += 1
-                    break
+            top_songs_per_month[month][uri]["times_played"] += 1
 
-    top_songs_full_time.sort(key=lambda x: x["times_played"], reverse=True)
+        # Gesamt
+        if uri not in top_songs_full_time:
+            new_entry = json.loads(json.dumps(entry))  # deepcopy via JSON
+            new_entry["times_played"] = 1
+            top_songs_full_time[uri] = new_entry
+        else:
+            top_songs_full_time[uri]["times_played"] += 1
+
+    top_songs_full_time = sorted(top_songs_full_time.values(), key=lambda x: x["times_played"], reverse=True)
     top_songs_full_time_top_25 = top_songs_full_time[:25]
 
     utils.append_md(output_file, f"### Top-Songs (gesamt)")
@@ -311,7 +316,7 @@ def analyse_top_songs(data, output_file, output_path):
     for month in sorted(top_songs_per_month.keys()):
         songs = top_songs_per_month[month]
         # Sortiere Songs nach Anzahl der Plays
-        songs.sort(key=lambda x: x["times_played"], reverse=True)
+        songs = sorted(songs.values(), key=lambda x: x["times_played"], reverse=True)
 
         # Nimm die Top 10 Songs
         top_songs = songs[:25]
