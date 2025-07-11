@@ -2,12 +2,16 @@ import os
 import sys
 import utils
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import json
 import requests
 import urllib.parse
 import time
+
+load_dotenv()
+TIMEZONE = os.getenv("TIMEZONE")
 
 def main(input_filename):
     input_path = os.path.join("userdata", input_filename)
@@ -32,7 +36,7 @@ def analyse(data, output_file, output_path):
         artist_urls[artist] = (song.get('lastfm_data', {}) or {}).get('track', {}).get('artist', {}).get('url', None)
         artist_times[artist] += song['spotify_data']['ms_played']
         ts = song['spotify_data']['ts']
-        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone()
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
 
     artist_times_sorted = sorted(artist_times.items(), key=lambda x: x[1], reverse=True)
 

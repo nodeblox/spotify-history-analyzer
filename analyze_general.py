@@ -2,9 +2,14 @@ import matplotlib.pyplot as plt
 import sys
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from dotenv import load_dotenv
 from collections import defaultdict
 import analyze_artists
 import utils
+
+load_dotenv()
+TIMEZONE = os.getenv("TIMEZONE")
 
 MIN_PLAY_DURATION = 20000  # in ms
 
@@ -104,8 +109,8 @@ def analyse_general(data, output_file):
         if track_uri:
             different_songs.add(track_uri)
 
-    start_date = datetime.strptime(data[0].get('spotify_data', {}).get('ts'), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone().date()
-    end_date = datetime.strptime(data[-1].get('spotify_data', {}).get('ts'), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone().date()
+    start_date = datetime.strptime(data[0].get('spotify_data', {}).get('ts'), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
+    end_date = datetime.strptime(data[-1].get('spotify_data', {}).get('ts'), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
 
     days_count = (end_date - start_date).days + 1  # +1, damit Start- und Endtag mitzählen
 
@@ -113,7 +118,7 @@ def analyse_general(data, output_file):
     for entry in data:
         ts = entry.get('spotify_data', {}).get('ts')
         if ts:
-            date = datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone().date()
+            date = datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
             days_with_activity.add(date)
 
     utils.append_md(output_file, f"## Allgemeine Statistiken\n"
@@ -140,7 +145,7 @@ def analyse_activity_by_time(data, output_file, output_path):
         ts = entry.get('spotify_data', {}).get('ts')
         if not ts or entry.get('spotify_data', {}).get('ms_played', 0) < MIN_PLAY_DURATION:
             continue
-        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone()
+        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
         month = date.strftime("%Y-%m")  # z.B. "2025-07"
         songs_per_month[month] += 1
 
@@ -149,7 +154,7 @@ def analyse_activity_by_time(data, output_file, output_path):
     counts = [songs_per_month[m] for m in sorted_months]
 
     # Monatsnamen im deutschen Format für die x-Achse (z.B. "07.2025")
-    labels = [datetime.strptime(m, "%Y-%m").replace(tzinfo=timezone.utc).astimezone().strftime("%m.%Y") for m in sorted_months]
+    labels = [datetime.strptime(m, "%Y-%m").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).strftime("%m.%Y") for m in sorted_months]
 
     plt.figure(figsize=(12, 6))
     plt.bar(labels, counts, color="skyblue")
@@ -174,7 +179,7 @@ def analyse_activity_by_time(data, output_file, output_path):
         ts = entry.get('spotify_data', {}).get('ts')
         if not ts or entry.get('spotify_data', {}).get('ms_played', 0) < MIN_PLAY_DURATION:
             continue
-        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone()
+        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
         weekday = date.strftime("%A")
         date_str = date.strftime("%Y-%m-%d")
 
@@ -225,7 +230,7 @@ def analyse_activity_by_time(data, output_file, output_path):
         if not ts or not ms_played:
             continue
         
-        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone()
+        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
         weekday = date.strftime("%A")
         hour = date.hour
         quarter = f"{date.year}-Q{(date.month - 1)//3 + 1}"
@@ -300,7 +305,7 @@ def analyse_top_songs(data, output_file, output_path):
         ts = spotify_data.get('ts')
         if not ts or spotify_data.get('ms_played', 0) < MIN_PLAY_DURATION:
             continue
-        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone()
+        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
         month = date.strftime("%Y-%m")
 
         if not any(song["spotify_data"]["spotify_track_uri"] == entry["spotify_data"]["spotify_track_uri"] for song in top_songs_per_month[month]):
@@ -408,7 +413,7 @@ def analyse_top_artists(data, output_file, output_path):
         artist_urls[artist] = (song.get('lastfm_data', {}) or {}).get("track", {}).get('artist', {}).get('url', None)
         artist_times[artist] += song['spotify_data']['ms_played']
         ts = song['spotify_data']['ts']
-        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone()
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
         month = dt.strftime("%Y-%m")
         artist_times_by_month[month][artist] += song['spotify_data']['ms_played']
 
