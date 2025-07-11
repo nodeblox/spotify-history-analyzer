@@ -7,11 +7,22 @@ from dotenv import load_dotenv
 from collections import defaultdict
 import analyze_artists
 import utils
+import sqlite3
+import json
+
+# === Datenbank initialisieren ===
+os.makedirs(os.path.join(".cache"), exist_ok=True)
+conn = sqlite3.connect("./.cache/cache.db")
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+# Tabelle erstellen
+cur.execute("CREATE TABLE IF NOT EXISTS songdata (id STRING PRIMARY KEY, json JSON)")
+conn.commit()
 
 load_dotenv()
 TIMEZONE = os.getenv("TIMEZONE")
 
-MIN_PLAY_DURATION = 20000  # in ms
+MIN_PLAY_DURATION = os.getenv("MIN_PLAY_DURATION", 20000)  # in ms
 
 def main(input_filename):
     input_path = os.path.join("userdata", input_filename)
@@ -39,84 +50,27 @@ def main(input_filename):
 
     return output_file
 
-def generate_songdata_file(song, output_path, processed_songfiles=set()):
-    track_data = song.get('spotify_data', {})
-    lastfm_data = song.get("lastfm_data", {}).get("track")
-
-    if (
-        lastfm_data is not None
-        and lastfm_data.get("name") is not None
-        and track_data["spotify_track_uri"] not in processed_songfiles
-    ):
-        processed_songfiles.add(track_data["spotify_track_uri"])
-        songdata_file = os.path.join(
-            output_path, "songs", track_data["spotify_track_uri"][14:] + ".md"
-        )
-        utils.clear_md(songdata_file)
-
-        image_list = lastfm_data.get("album", {}).get("image", [])
-        extralarge_image = next(
-            (item.get("#text") for item in image_list if item.get("size") == "extralarge"),
-            None,
-        )
-
-        utils.append_md(
-            songdata_file,
-            f'# {lastfm_data["name"]}'
-        )
-
-        if lastfm_data.get("album", {}):
-            utils.append_md(songdata_file, f"from Album **[{lastfm_data['album']['title']}]({lastfm_data['album']['url']})**")
-
-        if lastfm_data.get("album", {}):
-            utils.append_md(songdata_file, f"by **[{lastfm_data['artist']['name']}]({lastfm_data['artist']['url']})**")
-
-        duration_ms = int(lastfm_data.get('duration', '0'))
-        duration_string = f"{duration_ms // 60000}min, {((duration_ms%60000)/1000):.0f}sec"
-        utils.append_md(songdata_file, f"**Duration:** {duration_string if duration_ms > 0 else 'unknown'}")
-
-        if extralarge_image:
-            utils.append_md(
-                songdata_file,
-                f'\n![{lastfm_data["album"]["title"]}]({extralarge_image})',
-            )
-
-        song_wiki = lastfm_data.get("wiki", None)
-        if song_wiki is not None:
-            utils.append_md(songdata_file, "### Wiki\n"
-                                    + utils.html_to_md_links(song_wiki['content'])
-                                    + f"\n\n(**Published:** {song_wiki['published']})")
-        else:
-            utils.append_md(songdata_file, f'\n[{lastfm_data["url"]}]({lastfm_data["url"]})\n',)
-
-        tags = lastfm_data.get('toptags', {}).get('tag', [])
-        if len(tags) > 0:
-            utils.append_md(songdata_file, "### Tags / Genres")
-            for tag in tags:
-                utils.append_md(songdata_file, f"- [[../tags/{utils.sanitize_filename(tag['name'])}.md|{tag['name']}]]")
-
-
 def analyse_general(data, output_file):
     print("📊 Analysiere allgemeine Statistiken...")
     total_songs = len(data)
-    songs_with_min_duration = sum(1 for entry in data if entry.get('spotify_data', {}).get('ms_played', 0) >= MIN_PLAY_DURATION)
-    total_duration = sum(entry.get('spotify_data', {}).get('ms_played', 0) for entry in data) / 1000  # in Sekunden
+    songs_with_min_duration = sum(1 for entry in data if entry.get('ms_played', 0) >= MIN_PLAY_DURATION)
+    total_duration = sum(entry.get('ms_played', 0) for entry in data) / 1000  # in Sekunden
     total_duration_hours = total_duration / 3600
     total_duration_days = total_duration_hours / 24
     different_songs = set()
     for entry in data:
-        track_uri = entry.get('spotify_data', {}).get('spotify_track_uri')
+        track_uri = entry.get('spotify_track_uri')
         if track_uri:
             different_songs.add(track_uri)
 
-    start_date = datetime.strptime(data[0].get('spotify_data', {}).get('ts'), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
-    end_date = datetime.strptime(data[-1].get('spotify_data', {}).get('ts'), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
+    start_date = datetime.strptime(data[0].get('ts'), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
+    end_date = datetime.strptime(data[-1].get('ts'), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
 
     days_count = (end_date - start_date).days + 1  # +1, damit Start- und Endtag mitzählen
 
     days_with_activity = set()
     for entry in data:
-        ts = entry.get('spotify_data', {}).get('ts')
+        ts = entry.get('ts')
         if ts:
             date = datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
             days_with_activity.add(date)
@@ -142,8 +96,8 @@ def analyse_activity_by_time(data, output_file, output_path):
     songs_per_month = defaultdict(int)
 
     for entry in data:
-        ts = entry.get('spotify_data', {}).get('ts')
-        if not ts or entry.get('spotify_data', {}).get('ms_played', 0) < MIN_PLAY_DURATION:
+        ts = entry.get('ts')
+        if not ts or entry.get('ms_played', 0) < MIN_PLAY_DURATION:
             continue
         date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
         month = date.strftime("%Y-%m")  # z.B. "2025-07"
@@ -176,8 +130,8 @@ def analyse_activity_by_time(data, output_file, output_path):
     weekday_counts = defaultdict(int)
 
     for entry in data:
-        ts = entry.get('spotify_data', {}).get('ts')
-        if not ts or entry.get('spotify_data', {}).get('ms_played', 0) < MIN_PLAY_DURATION:
+        ts = entry.get('ts')
+        if not ts or entry.get('ms_played', 0) < MIN_PLAY_DURATION:
             continue
         date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
         weekday = date.strftime("%A")
@@ -223,7 +177,7 @@ def analyse_activity_by_time(data, output_file, output_path):
     days_by_quarter = defaultdict(lambda: defaultdict(set))
 
     for entry in data:
-        spotify_data = entry.get('spotify_data', {})
+        spotify_data = entry
         ts = spotify_data.get('ts')
         ms_played = spotify_data.get('ms_played')  # Dauer in Millisekunden
 
@@ -301,32 +255,30 @@ def analyse_top_songs(data, output_file, output_path):
     top_songs_full_time = []
 
     for entry in data:
-        spotify_data = entry.get('spotify_data', {})
+        spotify_data = entry
         ts = spotify_data.get('ts')
-        if not ts or spotify_data.get('ms_played', 0) < MIN_PLAY_DURATION:
+        if not ts or spotify_data.get('ms_played', 0) > MIN_PLAY_DURATION or not spotify_data.get('master_metadata_track_name'):
             continue
         date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
         month = date.strftime("%Y-%m")
 
-        if not any(song["spotify_data"]["spotify_track_uri"] == entry["spotify_data"]["spotify_track_uri"] for song in top_songs_per_month[month]):
+        if not any(song["spotify_track_uri"] == entry["spotify_track_uri"] for song in top_songs_per_month[month]):
             entry["times_played"] = 1
             top_songs_per_month[month].append(entry)
         else:
             for song in top_songs_per_month[month]:
-                if song["spotify_data"]["spotify_track_uri"] == entry["spotify_data"]["spotify_track_uri"]:
+                if song["spotify_track_uri"] == entry["spotify_track_uri"]:
                     song["times_played"] += 1
                     break
 
-        if not any(song["spotify_data"]["spotify_track_uri"] == entry["spotify_data"]["spotify_track_uri"] for song in top_songs_full_time):
+        if not any(song["spotify_track_uri"] == entry["spotify_track_uri"] for song in top_songs_full_time):
             entry["times_played"] = 1
             top_songs_full_time.append(entry)
         else:
             for song in top_songs_full_time:
-                if song["spotify_data"]["spotify_track_uri"] == entry["spotify_data"]["spotify_track_uri"]:
+                if song["spotify_track_uri"] == entry["spotify_track_uri"]:
                     song["times_played"] += 1
                     break
-
-    processed_songfiles = set()
 
     top_songs_full_time.sort(key=lambda x: x["times_played"], reverse=True)
     top_songs_full_time_top_25 = top_songs_full_time[:25]
@@ -338,19 +290,15 @@ def analyse_top_songs(data, output_file, output_path):
     for song in top_songs_full_time_top_25:
         if i == 10: utils.append_md(output_file, "##### 11 bis 25")
         i+=1
-        track_data = song.get('spotify_data', {})
-        lastfm_data = song.get("lastfm_data", {"track": None})["track"]
         
-        generate_songdata_file(song, output_path, processed_songfiles)
+        cur.execute("SELECT * FROM songdata WHERE id = ?", [song.get("spotify_track_uri")])
+        lastfm_data = cur.fetchone()
 
-        track_name = track_data.get("master_metadata_track_name", "Unbekannt")
-        artist_name = track_data.get("master_metadata_album_artist_name", "Unbekannt")
+        track_name = song.get("master_metadata_track_name", "Unbekannt")
+        artist_name = song.get("master_metadata_album_artist_name", "Unbekannt")
         times_played = song.get("times_played", 0)
-        if (
-            lastfm_data is not None
-            and lastfm_data.get("name") is not None
-        ):
-            link = f'[[./songs/{track_data["spotify_track_uri"][14:]}.md|{track_name}]]'
+        if lastfm_data:
+            link = f'[[./songs/{song["spotify_track_uri"][14:]}.md|{track_name}]]'
         else:
             link = track_name
 
@@ -376,20 +324,16 @@ def analyse_top_songs(data, output_file, output_path):
             if i == 10: utils.append_md(output_file, "##### 11 bis 25")
             i+=1
 
-            track_data = song.get('spotify_data', {})
-            lastfm_data = song.get("lastfm_data", {}).get("track")
-            
-            generate_songdata_file(song, output_path, processed_songfiles)
+            cur.execute("SELECT * FROM songdata WHERE id = ?", [song.get("spotify_track_uri")])
+            row = cur.fetchone()
+            lastfm_data = json.loads(row["json"]).get("track") if row else None
 
-            track_name = track_data.get("master_metadata_track_name", "Unbekannt")
-            artist_name = track_data.get("master_metadata_album_artist_name", "Unbekannt")
+            track_name = song.get("master_metadata_track_name", "Unbekannt")
+            artist_name = song.get("master_metadata_album_artist_name", "Unbekannt")
             times_played = song.get("times_played", 0)
 
-            if (
-                lastfm_data is not None
-                and lastfm_data.get("name") is not None
-            ):
-                link = f'[[./songs/{track_data["spotify_track_uri"][14:]}.md|{track_name}]]'
+            if lastfm_data:
+                link = f'[[./songs/{song["spotify_track_uri"][14:]}.md|{track_name}]]'
             else:
                 link = track_name
 
@@ -409,13 +353,16 @@ def analyse_top_artists(data, output_file, output_path):
 
     for song in data:
         if song is None: continue
-        artist = song['spotify_data'].get("master_metadata_album_artist_name", 'unknown')
-        artist_urls[artist] = (song.get('lastfm_data', {}) or {}).get("track", {}).get('artist', {}).get('url', None)
-        artist_times[artist] += song['spotify_data']['ms_played']
-        ts = song['spotify_data']['ts']
+        artist = song.get("master_metadata_album_artist_name")
+        cur.execute("SELECT * FROM songdata WHERE id = ?", [song.get("spotify_track_uri")])
+        row = cur.fetchone()
+        lastfm_data = json.loads(row["json"]).get("track") if row else None
+        artist_urls[artist] = lastfm_data['artist']['url'] if lastfm_data else None
+        artist_times[artist] += song['ms_played']
+        ts = song['ts']
         dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
         month = dt.strftime("%Y-%m")
-        artist_times_by_month[month][artist] += song['spotify_data']['ms_played']
+        artist_times_by_month[month][artist] += song['ms_played']
 
     artist_times_sorted = sorted(artist_times.items(), key=lambda x: x[1], reverse=True)
 
@@ -426,7 +373,7 @@ def analyse_top_artists(data, output_file, output_path):
     i = 0
     utils.append_md(output_file, "##### 1 bis 10")
     for artist, played_ms in top_artists:
-        if artist == "unknown": continue
+        if not artist: continue
         if i == 10: utils.append_md(output_file, "##### 11 bis 25")
         if i == 25: utils.append_md(output_file, "##### 26 bis 40")
         i+=1

@@ -12,10 +12,6 @@ def append_md(filename, text=""):
     try:
         with open(filename, 'a', encoding='utf-8') as f:
             f.write(text + '\n')
-        for _ in range(50):
-            if os.path.exists(filename):
-                break
-            time.sleep(0.05)
     except Exception as e:
         print(f"Fehler beim Anhängen an die Datei '{filename}': {e}")
 
@@ -23,7 +19,6 @@ def clear_md(filename):
     try:
         with open(filename, 'w', encoding='utf-8') as f:
             pass
-        time.sleep(0.02)
     except Exception as e:
         print(f"Fehler beim Leeren der Datei '{filename}': {e}")
 
@@ -63,3 +58,7 @@ def sanitize_filename(text):
     text = to_ascii(text)
     # Verbotene Zeichen ersetzen durch '_'
     return re.sub(r'[<>:"/\\|?*\n\r\t]', '_', text).strip()
+
+def count_files(directory):
+    return len([name for name in os.listdir(directory)
+                if os.path.isfile(os.path.join(directory, name))])
