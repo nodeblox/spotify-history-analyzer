@@ -412,7 +412,7 @@ def analyse_top_artists(data, output_file, output_path):
         for idx, (artist, played_ms) in enumerate(monthly_sorted, start=1):
             if artist == "unknown":
                 continue
-            link = f"[[./artists/{utils.sanitize_filename(artist)}.md|{artist}]]" if os.path.exists(os.path.join("output", "artists", utils.sanitize_filename(artist) + ".md")) else f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
+            link = f"[[./artists/{utils.sanitize_filename(artist)}.md|{artist}]]" if os.path.exists(os.path.join("output", "artists", utils.sanitize_filename(artist or "") + ".md")) else f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
             stunden = played_ms / 1000 / 60 / 60
             utils.append_md(output_file, f"{idx}. **{link}** – **{stunden:.2f} Stunden**")
     
