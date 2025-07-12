@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from collections import defaultdict
-import analyze_artists
 import utils
 import sqlite3
 import json
@@ -45,7 +44,6 @@ def main(input_filename):
     analyse_activity_by_time(data, output_file, output_path)
     analyse_top_songs(data, output_file, output_path)
     analyse_top_artists(data, output_file, output_path)
-    analyze_artists.main(input_filename)
     utils.append_md(output_file, f"### [[./artists.md|Mehr Artist-Informationen]]\n[[./artists.md]]")
 
     return output_file
@@ -382,7 +380,7 @@ def analyse_top_artists(data, output_file, output_path):
                                     output_path,
                                     data_size=35,
                                     show_percentages_in_legend=True)
-    utils.append_md(output_file, f"![Top 25 Artists Gesamt](./img/{os.path.basename(pie_path)} =300)")
+    utils.append_md(output_file, f"![Top 25 Artists Gesamt](./img/{os.path.basename(pie_path)})")
 
     i = 0
     utils.append_md(output_file, "##### 1 bis 10")
@@ -414,7 +412,7 @@ def analyse_top_artists(data, output_file, output_path):
         for idx, (artist, played_ms) in enumerate(monthly_sorted, start=1):
             if artist == "unknown":
                 continue
-            link = f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
+            link = f"[[./artists/{utils.sanitize_filename(artist)}.md|{artist}]]" if os.path.exists(os.path.join("output", "artists", utils.sanitize_filename(artist) + ".md")) else f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
             stunden = played_ms / 1000 / 60 / 60
             utils.append_md(output_file, f"{idx}. **{link}** – **{stunden:.2f} Stunden**")
     
@@ -454,7 +452,7 @@ def analyse_top_artists(data, output_file, output_path):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z. B. detailed_history.json)")
+        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z. B. history.json)")
         sys.exit(1)
     input_filename = sys.argv[1]
     main(input_filename)

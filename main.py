@@ -3,11 +3,13 @@ import sys
 import fetch_songdata
 import analyze_general
 import utils
-import generate_songdata_file
+import analyze_songs
+import analyze_artists
 
 def main(input_filename):
     fetch_songdata.main(input_filename)
-    generate_songdata_file.generate_all(input_filename)
+    analyze_artists.main(input_filename)
+    analyze_songs.main(input_filename)
     output_path = analyze_general.main(input_filename)
     print("✅ Analyse erfolgreich abgeschlossen!")
     print(f"📂 Du findest deine Analyseergebnisse unter {os.path.realpath(output_path)}.")

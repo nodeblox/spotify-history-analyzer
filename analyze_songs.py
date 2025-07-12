@@ -7,6 +7,7 @@ import matplotlib.ticker as ticker
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
+import sys
 
 load_dotenv()
 MIN_PLAY_DURATION = os.getenv("MIN_PLAY_DURATION", 20000)  # in ms
@@ -23,6 +24,72 @@ cur = conn.cursor()
 # Tabelle erstellen
 cur.execute("CREATE TABLE IF NOT EXISTS songdata (id STRING PRIMARY KEY, json JSON)")
 conn.commit()
+
+def main(input_filename: str):
+    input_path = os.path.join("userdata", input_filename)
+    output_dir = os.path.join("output", input_filename.replace(".json", ""))
+    os.makedirs(os.path.join(output_dir, "songs"), exist_ok=True)
+
+    output_file = os.path.join(output_dir, "songs.md")
+
+    print(f"📂 Lese Daten aus: {input_path}")
+    data = utils.load_data(input_path)
+    
+    data_count = len(data)
+    for i, song in enumerate(data):
+        generate_songdata_file(song.get("spotify_track_uri"), os.path.join("userdata", input_filename), os.path.join("output", input_filename.replace(".json", ""), "songs"))
+        print(f"✅ | {str(i).zfill(len(str(data_count)))} / {data_count}")
+
+    utils.clear_md(output_file)
+    print("📊 Analysiere Songs...")
+    
+    utils.append_md(output_file, "### All songs sorted by times listenned\n")
+    
+    all_songs_unsorted = {}  # spotify_track_uri -> song_entry
+
+    for entry in data:
+        ts = entry.get("ts")
+        if (
+            not ts
+            or entry.get("ms_played", 0) < MIN_PLAY_DURATION
+            or not entry.get("master_metadata_track_name")
+        ):
+            continue
+
+        uri = entry["spotify_track_uri"]
+
+        # Gesamt
+        if uri not in all_songs_unsorted:
+            new_entry = json.loads(json.dumps(entry))  # deepcopy via JSON
+            new_entry["times_played"] = 1
+            all_songs_unsorted[uri] = new_entry
+        else:
+            all_songs_unsorted[uri]["times_played"] += 1
+
+    all_songs_sorted = sorted(all_songs_unsorted.values(), key=lambda x: x["times_played"], reverse=True)
+    
+    i = 0
+    for song in all_songs_sorted:
+        i+=1
+        
+        cur.execute("SELECT * FROM songdata WHERE id = ?", [song.get("spotify_track_uri")])
+        lastfm_data = cur.fetchone()
+
+        track_name = song.get("master_metadata_track_name", "Unbekannt")
+        artist_name = song.get("master_metadata_album_artist_name", "Unbekannt")
+        times_played = song.get("times_played", 0)
+        if lastfm_data:
+            link = f'[[./songs/{song["spotify_track_uri"][14:]}.md|{track_name}]]'
+        else:
+            link = track_name
+
+        utils.append_md(
+            output_file,
+            f"{i}. **{link}** von {artist_name} – **{times_played}** mal gehört",
+        )
+    utils.append_md(output_file, "\n")
+    
+    # append_full_listening_history(output_file, data) # produces too much lag
 
 def plot_song_listening_over_time(spotify_data, track_id, lastfm_data, filename, output_path):
     song_name=lastfm_data.get("name", "Unbekannt")
@@ -185,10 +252,46 @@ def generate_songdata_file(track_id, data_path, output_path):
     utils.append_md(songdata_file, file_content)
     print(f"✅ | Songdata file erfolgreich generiert! ({track_id})")
     return "done"
+    
+def append_full_listening_history(output_file, data):
+    utils.append_md(output_file, "### Full listening history")
+    utils.append_md(output_file, "| Date | Time | Song | Artist | Stopped after | Finished |\n|-|-|-|-|-|-|")
+    for song in data:
+        ts = song.get("ts")
+        if (not ts or not song.get("master_metadata_track_name") or not song.get("spotify_track_uri")): continue
+        
+        track_id = song.get("spotify_track_uri")
 
-def generate_all(input_filename):
-    data = utils.load_data(os.path.join("userdata", input_filename))
-    data_count = len(data)
-    for i, song in enumerate(data):
-        generate_songdata_file(song.get("spotify_track_uri"), os.path.join("userdata", input_filename), os.path.join("output", input_filename.replace(".json", ""), "songs"))
-        print(f"✅ | {str(i).zfill(len(str(data_count)))} / {data_count}")
+        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        date = date.astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
+        
+        date_string = date.strftime("%Y-%m-%d")
+        time_string = date.strftime("%H-%M")
+        
+        title = song.get("master_metadata_track_name")
+        artist = song.get("master_metadata_album_artist_name")
+        
+        ms_played = song.get("ms_played")
+        stopped_after = str(ms_played / 1000) + "s"
+        
+        reason_end = song.get("reason_end")
+        finished = "✅ (trackdone)" if reason_end == "trackdone" else f"❌ ({reason_end})"
+        
+        songdata_file_path = f"./songs/{track_id[14:]}.md"
+        songdata_file_full_path = os.path.join("output", input_filename.replace(".json", ""), songdata_file_path)
+        if not os.path.exists(songdata_file_full_path):
+            songdata_file_path = None
+            
+        artist_file_path = f"./artists/{utils.sanitize_filename(artist)}.md"
+        artist_full_path = os.path.join("output", input_filename.replace(".json", ""), artist_file_path)
+        if not os.path.exists(artist_full_path):
+            artist_file_path = None
+        
+        utils.append_md(output_file, f"| {date_string} | {time_string} | {title} | {artist} | {stopped_after} | {finished} |")
+        
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z. B. history.json)")
+        sys.exit(1)
+    input_filename = sys.argv[1]
+    main(input_filename)

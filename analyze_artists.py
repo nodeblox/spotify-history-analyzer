@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
-
+import matplotlib.pyplot as plt
 import utils
 
 # === Datenbank initialisieren ===
@@ -29,7 +29,7 @@ conn.commit()
 # === Konfiguration laden ===
 load_dotenv()
 TIMEZONE = os.getenv("TIMEZONE")
-
+MIN_PLAY_DURATION = os.getenv("MIN_PLAY_DURATION", 20000)  # in ms
 
 def main(input_filename: str):
     input_path = os.path.join("userdata", input_filename)
@@ -122,6 +122,69 @@ def get_artist_data(index, data, artist_name, output_dir, artist_url=None):
     else:
         utils.append_md(artist_filepath, "Keine Tags gefunden.")
     utils.append_md(artist_filepath, "\n" + summary)
+    utils.append_md(artist_filepath, "\n")
+    
+    # === Monatsbalkendiagramm ===
+    monthly_minutes = defaultdict(float)
+    total_artist_minutes = 0
+    total_all_minutes = 0
+
+    for entry in data:
+        ts = entry.get("ts")
+        if not ts:
+            continue
+        ms_played = entry.get("ms_played", 0)
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        if TIMEZONE:
+            dt = dt.astimezone(ZoneInfo(TIMEZONE))
+        month = dt.strftime("%Y-%m")
+        minutes = ms_played / 60000
+        total_all_minutes += minutes
+        if not monthly_minutes[month]: monthly_minutes[month] = 0
+        if entry.get("master_metadata_album_artist_name") == artist_name:
+            monthly_minutes[month] += minutes
+            total_artist_minutes += minutes
+
+    # Monats-Balkendiagramm generieren
+    if monthly_minutes:
+        months = sorted(monthly_minutes.keys())
+        minutes = [monthly_minutes[m] for m in months]
+
+        plt.figure(figsize=(12, 6))
+        plt.bar(months, minutes, color='skyblue')
+        plt.title(f"Listening minutes per month for {utils.to_ascii(artist_name)}")
+        plt.ylabel("listening minutes")
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+
+        monthly_chart_filename = f"{utils.sanitize_filename(artist_name)}_monthly_minutes.png"
+        monthly_chart_path = os.path.join(output_dir, "img", monthly_chart_filename)
+        os.makedirs(os.path.dirname(monthly_chart_path), exist_ok=True)
+        plt.savefig(monthly_chart_path, bbox_inches='tight', pad_inches=0.5)
+        plt.close()
+
+        utils.append_md(artist_filepath, f"![Listening behavior per month](../img/{monthly_chart_filename})")
+    else:
+        utils.append_md(artist_filepath, "_Keine Daten für monatliches Hörverhalten gefunden._")
+
+    # === Kreisdiagramm Gesamtzeit: Artist vs. Rest ===
+    if total_artist_minutes > 0:
+        rest_minutes = total_all_minutes - total_artist_minutes
+        labels = [f"{utils.to_ascii(artist_name)}", "others"]
+        sizes = [total_artist_minutes, rest_minutes]
+
+        plt.figure(figsize=(6, 6))
+        plt.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90, counterclock=False, colors=["#ff9999", "#dddddd"])
+        plt.title(f"{utils.to_ascii(artist_name)} vs. rest - total listening time")
+        plt.axis("equal")
+        pie_chart_filename = f"{utils.sanitize_filename(artist_name)}_share_vs_rest.png"
+        pie_chart_path = os.path.join(output_dir, "img", pie_chart_filename)
+        plt.savefig(pie_chart_path, bbox_inches='tight', pad_inches=0.5)
+        plt.close()
+
+        utils.append_md(artist_filepath, f"![Proportion of total playing time](../img/{pie_chart_filename})")
+    else:
+        utils.append_md(artist_filepath, "_Keine Hörzeit für diesen Artist vorhanden._")
 
     get_most_heared_songs(data, artist_name, artist_filepath, output_dir)
 
@@ -142,8 +205,9 @@ def get_most_heared_songs(data, artist, artist_filepath, output_dir):
         artist_name = entry.get("master_metadata_album_artist_name", "")
         track_uri = entry.get("spotify_track_uri")
         track_name = entry.get("master_metadata_track_name", "Unbekannt")
+        ms_played = entry.get("ms_played")
 
-        if artist_name != artist or not track_uri:
+        if artist_name != artist or not track_uri or not ms_played or ms_played < MIN_PLAY_DURATION:
             continue
 
         cur.execute("SELECT json FROM songdata WHERE id = ?", [track_uri])
@@ -170,7 +234,6 @@ def get_most_heared_songs(data, artist, artist_filepath, output_dir):
     for i, (track_uri, song) in enumerate(top_songs, start=1):
         if i == 1:
             utils.append_md(artist_filepath, "##### 1 bis 10\n")
-            utils.append_md(artist_filepath, "##### 11 bis 25\n")
         elif i == 11:
             utils.append_md(artist_filepath, "##### 11 bis 25\n")
 
@@ -178,8 +241,7 @@ def get_most_heared_songs(data, artist, artist_filepath, output_dir):
         times_played = song["times_played"]
         lastfm_data = song["lastfm_data"]
 
-        song_path = os.path.join(output_dir, "songs", track_uri[14:] + ".md")
-        link = f'[[../songs/{track_uri[14:]}.md|{track_name}]]' if lastfm_data and os.path.exists(song_path) else track_name
+        link = f'[[../songs/{track_uri[14:]}.md|{track_name}]]' if lastfm_data else track_name
         utils.append_md(artist_filepath, f"{i}. **{link}** – **{times_played}** mal gehört")
 
 

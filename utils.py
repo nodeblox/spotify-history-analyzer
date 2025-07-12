@@ -83,7 +83,7 @@ def html_to_md_links(text):
 def sanitize_filename(text):
     text = to_ascii(text)
     # Verbotene Zeichen ersetzen durch '_'
-    return re.sub(r'[<>:"/\\|?*\n\r\t]', '_', text).strip()
+    return re.sub(r'[<>:"/\\|?*\n\r\t\s]', '_', text).strip()
 
 def count_files(directory):
     return len([name for name in os.listdir(directory)
