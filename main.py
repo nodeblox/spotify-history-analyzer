@@ -2,7 +2,6 @@ import os
 import sys
 import fetch_songdata
 import analyze_general
-import utils
 import analyze_songs
 import analyze_artists
 
