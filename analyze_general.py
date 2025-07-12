@@ -374,6 +374,15 @@ def analyse_top_artists(data, output_file, output_path):
     top_artists = artist_times_sorted[:40]
 
     utils.append_md(output_file, f"### Top-Artists (gesamt)")
+    
+    # --- Kuchendiagramm (Gesamt) ---
+    pie_path = utils.plot_pie_chart(artist_times,
+                                    "Top 25 Artists (Gesamt)",
+                                    "top25_artists_total.png",
+                                    output_path,
+                                    data_size=35,
+                                    show_percentages_in_legend=True)
+    utils.append_md(output_file, f"![Top 25 Artists Gesamt](./img/{os.path.basename(pie_path)} =300)")
 
     i = 0
     utils.append_md(output_file, "##### 1 bis 10")
@@ -388,6 +397,16 @@ def analyse_top_artists(data, output_file, output_path):
     # Monatliche Auswertung
     for month in sorted(artist_times_by_month):
         utils.append_md(output_file, f"\n### Top-Artists im Monat {month}")
+        
+        # Kuchendiagramm für diesen Monat
+        pie_path_month = utils.plot_pie_chart(artist_times_by_month[month], 
+                                        f"Top 25 Artists im Monat {month}", 
+                                        f"top25_artists_{month}.png", 
+                                        output_path,
+                                        data_size=25,
+                                        show_percentages_in_legend=True)
+        utils.append_md(output_file, f"![Top 25 Artists {month}](./img/{os.path.basename(pie_path_month)})")
+        
         monthly_sorted = sorted(
             artist_times_by_month[month].items(), key=lambda x: x[1], reverse=True
         )[:10]

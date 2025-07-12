@@ -2,11 +2,16 @@ import utils
 import os
 import sqlite3
 import json
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from dotenv import load_dotenv
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 load_dotenv()
 MIN_PLAY_DURATION = os.getenv("MIN_PLAY_DURATION", 20000)  # in ms
 RECREATE_SONGDATA_FILES = os.getenv("RECREATE_SONGDATA_FILES", False)
+TIMEZONE = os.getenv("TIMEZONE")
 
 created_files = set()
 
@@ -18,6 +23,68 @@ cur = conn.cursor()
 # Tabelle erstellen
 cur.execute("CREATE TABLE IF NOT EXISTS songdata (id STRING PRIMARY KEY, json JSON)")
 conn.commit()
+
+def plot_song_listening_over_time(spotify_data, track_id, lastfm_data, filename, output_path):
+    song_name=lastfm_data.get("name", "Unbekannt")
+    artist_name=lastfm_data.get("artist", {}).get("name", "Unbekannt")
+    
+    TIMEZONE_OBJ = ZoneInfo(TIMEZONE) if TIMEZONE else None
+
+    # Gültige Plays des gewünschten Songs filtern
+    filtered = [
+        entry for entry in spotify_data
+        if entry.get("spotify_track_uri") == track_id
+        and entry.get("ms_played", 0) > MIN_PLAY_DURATION
+        and entry.get("spotify_track_uri") is not None
+    ]
+
+    if not filtered:
+        print(f"⚠️  Keine gültigen Abspiel-Daten für Song {song_name}. Kein Diagramm erstellt.")
+        return None
+
+    # X-Achse: alle Monate im Datensatz (aus spotify_data)
+    months_all = [
+        datetime.strptime(e["ts"], "%Y-%m-%dT%H:%M:%SZ")
+        .replace(tzinfo=timezone.utc).astimezone(TIMEZONE_OBJ)
+        .replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        for e in spotify_data
+    ]
+    start, end = min(months_all), max(months_all)
+
+    # Zeitachse erzeugen (alle Monate im Zeitraum)
+    full_months = []
+    current = start
+    while current <= end:
+        full_months.append(current.strftime("%Y-%m"))
+        current += timedelta(days=32)
+        current = current.replace(day=1)
+
+    # Zählung gültiger Plays des Songs pro Monat
+    count_by_month = {}
+    for entry in filtered:
+        dt = datetime.strptime(entry["ts"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(TIMEZONE_OBJ)
+        key = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m")
+        count_by_month[key] = count_by_month.get(key, 0) + 1
+
+    # Y-Achse: Anzahl Plays (0 wenn keine)
+    counts = [count_by_month.get(month, 0) for month in full_months]
+
+    # Plot
+    plt.figure(figsize=(10, 5))
+    plt.bar(full_months, counts, color="skyblue")
+    ax = plt.gca()
+    ax.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+    plt.title(f"Listening activity per month: {song_name} - {artist_name}")
+    plt.ylabel("times listened")
+    plt.xticks(rotation=45)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+
+    os.makedirs(output_path, exist_ok=True)
+    path = os.path.join(output_path, filename)
+    plt.savefig(path, bbox_inches='tight', pad_inches=0.5)
+    plt.close()
+    return filename
 
 def generate_songdata_file(track_id, data_path, output_path):
     os.makedirs(os.path.join(output_path), exist_ok=True)
@@ -31,12 +98,12 @@ def generate_songdata_file(track_id, data_path, output_path):
     
     songdata_file = os.path.join(output_path, track_id[14:] + ".md")
     if os.path.exists(songdata_file) and not RECREATE_SONGDATA_FILES: 
-        print(f"ℹ️ | Songdata file existiert bereits. ({track_id})")
+        print(f"ℹ️  | Songdata file existiert bereits. ({track_id})")
         return "done"
 
     spotify_data = [s for s in utils.load_data(data_path) if s.get("spotify_track_uri") == track_id]
     if not spotify_data:
-        print(f"⚠️ | Es wurde keine Höraktivität für den Song {track_id} gefunden. - Diese wird der songdata file nicht beigefügt!")
+        print(f"⚠️  | Es wurde keine Höraktivität für den Song {track_id} gefunden. - Diese wird der songdata file nicht beigefügt!")
     
     cur.execute("SELECT * FROM songdata WHERE id = ?", [track_id])
     row = cur.fetchone()
@@ -58,7 +125,7 @@ def generate_songdata_file(track_id, data_path, output_path):
     
     album_data = lastfm_data.get("album", {})
     if not album_data:
-        print(f"⚠️ | Es wurden keine Album-Informationen für den Song {track_id} gefunden. - Diese werden der songdata file nicht beigefügt!")
+        print(f"⚠️  | Es wurden keine Album-Informationen für den Song {track_id} gefunden. - Diese werden der songdata file nicht beigefügt!")
 
     utils.clear_md(songdata_file)
     file_content = ""
@@ -87,7 +154,7 @@ def generate_songdata_file(track_id, data_path, output_path):
     if cover_image:
         file_content += f'\n![{album_data["title"] if album_data else "unknown album"}]({cover_image})\n'
     else:
-        print(f"⚠️ | Es wurde kein Cover für den Song {track_id} gefunden. - Dieses wird der songdata file nicht beigefügt!")
+        print(f"⚠️  | Es wurde kein Cover für den Song {track_id} gefunden. - Dieses wird der songdata file nicht beigefügt!")
 
     song_wiki = lastfm_data.get("wiki", None)
     if song_wiki is not None:
@@ -100,10 +167,28 @@ def generate_songdata_file(track_id, data_path, output_path):
         file_content += "### Tags / Genres\n"
         for tag in tags:
             file_content += f"- [[../tags/{utils.sanitize_filename(tag['name'])}.md|{tag['name']}]]\n"
+            
+    # Create plot of listening activity per month (if spotify_data available)
+    if spotify_data:
+        plot_file = plot_song_listening_over_time(
+            utils.load_data(data_path),
+            track_id,
+            lastfm_data,
+            filename=track_id[14:] + "_listening_over_time.png",
+            output_path=os.path.join(output_path, "..", "img")
+        )
+        if plot_file:
+            # Bild im Markdown verlinken
+            file_content += "### Listening Activity per Month\n"
+            file_content += f"![listening activity per month](../img/{plot_file})\n"
+
     utils.append_md(songdata_file, file_content)
     print(f"✅ | Songdata file erfolgreich generiert! ({track_id})")
     return "done"
 
 def generate_all(input_filename):
-    for song in utils.load_data(os.path.join("userdata", input_filename)):
+    data = utils.load_data(os.path.join("userdata", input_filename))
+    data_count = len(data)
+    for i, song in enumerate(data):
         generate_songdata_file(song.get("spotify_track_uri"), os.path.join("userdata", input_filename), os.path.join("output", input_filename.replace(".json", ""), "songs"))
+        print(f"✅ | {str(i).zfill(len(str(data_count)))} / {data_count}")

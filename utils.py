@@ -1,4 +1,5 @@
 from pykakasi import kakasi
+import matplotlib.pyplot as plt
 import time
 import os
 import re
@@ -33,16 +34,16 @@ def to_ascii(text):
 
     # Ideographische Satzzeichen ersetzen
     replacements = {
-        '、': ',',   # ideographisches Komma
-        '。': '.',   # ideographischer Punkt
-        '，': ',',   # voller Breite Komma
-        '．': '.',   # voller Breite Punkt
-        '：': ':',   # voller Breite Doppelpunkt
-        '；': ';',   # voller Breite Semikolon
-        '？': '?',   # voller Breite Fragezeichen
-        '！': '!',   # voller Breite Ausrufezeichen
-        '〜': '~',   # Wellenlinie
-        '・': '-',   # Mittelpunkt (kann man zu Bindestrich machen)
+        '、': ', ',   # ideographisches Komma
+        '。': '. ',   # ideographischer Punkt
+        '，': ', ',   # voller Breite Komma
+        '．': '. ',   # voller Breite Punkt
+        '：': ' : ',   # voller Breite Doppelpunkt
+        '；': ' ; ',   # voller Breite Semikolon
+        '？': ' ? ',   # voller Breite Fragezeichen
+        '！': ' ! ',   # voller Breite Ausrufezeichen
+        '〜': ' ~ ',   # Wellenlinie
+        '・': ' · ',   # Mittelpunkt (kann man zu Bindestrich machen)
     }
 
     for orig, repl in replacements.items():
@@ -62,3 +63,54 @@ def sanitize_filename(text):
 def count_files(directory):
     return len([name for name in os.listdir(directory)
                 if os.path.isfile(os.path.join(directory, name))])
+    
+def plot_pie_chart(
+    data_dict: dict,
+    title: str,
+    filename: str,
+    output_path: str,
+    data_size: int = 15,
+    display_legend: bool = True,
+    legend_title: str = "",
+    show_percentages_in_legend: bool = False
+):
+    sorted_items = sorted(data_dict.items(), key=lambda x: x[1], reverse=True)
+    top_items = sorted_items[:data_size]
+    rest_value = sum(v for _, v in sorted_items[data_size:])
+    
+    labels = [to_ascii(artist) if artist else "Unbekannt" for artist, _ in top_items]
+    sizes = [v for _, v in top_items]
+    
+    if rest_value > 0:
+        labels.append("Rest")
+        sizes.append(rest_value)
+
+    fig, ax = plt.subplots(figsize=(18, 9))
+    wedges, texts, autotexts = ax.pie(
+        sizes,
+        labels=labels,
+        autopct="%1.1f%%",
+        startangle=90,
+        counterclock=False,
+        textprops={'fontsize': 8}
+    )
+    ax.axis("equal")
+    ax.set_title(title)
+
+    if display_legend:
+        if show_percentages_in_legend:
+            total = sum(sizes)
+            legend_labels = [f"{label} ({size / total * 100:.1f}%)" for label, size in zip(labels, sizes)]
+        else:
+            legend_labels = labels
+        
+        if legend_title:
+            ax.legend(wedges, legend_labels, title=legend_title, loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
+        else:
+            ax.legend(wedges, legend_labels, loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
+
+    path = os.path.join(output_path, "img", filename)
+    plt.tight_layout()
+    plt.savefig(path, bbox_inches='tight', pad_inches=0.5)
+    plt.close()
+    return path

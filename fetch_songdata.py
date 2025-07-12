@@ -56,8 +56,8 @@ def main(input_filename="spotify_history.json"):
         data = json.load(file)
 
     print(f"📂 Lese Daten aus: {input_path}")
-    dataCount = len(data)
-    print(f"📊 Anzahl der Einträge: {dataCount}")
+    data_count = len(data)
+    print(f"📊 Anzahl der Einträge: {data_count}")
     current_count = 0
     for entry in data:
         start_processing_ts = time.time()
@@ -83,7 +83,7 @@ def main(input_filename="spotify_history.json"):
                 continue
             cur.execute("INSERT INTO songdata VALUES (?, ?)", [track_id, json.dumps(lastfm_data)])
             conn.commit()
-        print(f"   ✅ | {str(current_count).zfill(len(str(dataCount)))} / {dataCount} | {artist} - {track} (ID: {track_id}) ({'cache' if in_cache else 'api'})")
+        print(f"   ✅ | {str(current_count).zfill(len(str(data_count)))} / {data_count} | {artist} - {track} (ID: {track_id}) ({'cache' if in_cache else 'api'})")
         end_processing_ts = time.time()
         sleep_time: float = 0.25 - (end_processing_ts - start_processing_ts)
         if not in_cache and sleep_time > 0:
