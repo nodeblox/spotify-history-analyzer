@@ -43,7 +43,7 @@ def main(input_filename: str):
     utils.clear_md(output_file)
     print("📊 Analysiere Songs...")
     
-    utils.append_md(output_file, "### All songs sorted by times listenned\n")
+    utils.append_md(output_file, "### All songs sorted by times listened\n")
     
     all_songs_unsorted = {}  # spotify_track_uri -> song_entry
 
