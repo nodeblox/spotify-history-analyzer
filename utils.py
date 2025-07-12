@@ -1,4 +1,4 @@
-from pykakasi import kakasi
+from unidecode import unidecode
 import matplotlib.pyplot as plt
 import time
 import os
@@ -25,27 +25,52 @@ def clear_md(filename):
 
 
 def to_ascii(text):
-    kks = kakasi()
-    kks.setMode('J', 'a')  # Japanese zu ascii (Romaji)
-    kks.setMode('K', 'a')  # Katakana zu ascii
-    kks.setMode('H', 'a')  # Hiragana zu ascii
-    converter = kks.getConverter()
-    converted = converter.do(text)
+    converted = unidecode(text)
 
-    # Ideographische Satzzeichen ersetzen
     replacements = {
-        '、': ', ',   # ideographisches Komma
-        '。': '. ',   # ideographischer Punkt
-        '，': ', ',   # voller Breite Komma
-        '．': '. ',   # voller Breite Punkt
-        '：': ' : ',   # voller Breite Doppelpunkt
-        '；': ' ; ',   # voller Breite Semikolon
-        '？': ' ? ',   # voller Breite Fragezeichen
-        '！': ' ! ',   # voller Breite Ausrufezeichen
-        '〜': ' ~ ',   # Wellenlinie
-        '・': ' · ',   # Mittelpunkt (kann man zu Bindestrich machen)
+        # Interpunktion (volle Breite & ideografisch)
+        '、': ', ', '。': '. ', '，': ', ', '．': '. ', '：': ': ', '；': '; ',
+        '？': '? ', '！': '! ', '¡': '! ', '¿': '? ',
+        '「': '"', '」': '"', '『': '"', '』': '"',
+        '《': '"', '》': '"', '〈': '"', '〉': '"',
+        '“': '"', '”': '"', '‘': "'", '’': "'",
+
+        # Klammern & mathematische Zeichen
+        '（': '(', '）': ')', '［': '[', '］': ']', '｛': '{', '｝': '}',
+        '＜': '<', '＞': '>', '«': '"', '»': '"', '‹': '"', '›': '"',
+        '【': '[', '】': ']', '〔': '[', '〕': ']', '〘': '[', '〙': ']',
+
+        # Trennzeichen & Linien
+        'ー': '-', '—': '-', '–': '-', '―': '-', '−': '-', '‐': '-', '‑': '-',
+        '・': '-', '･': '-', '〜': '~', '～': '~',
+
+        # Punkte, Auslassung & Leerzeichen
+        '…': '...', '‥': '..', '・': '.', '•': '*', '∙': '*', '⋅': '*',
+        '　': ' ',  # full-width space
+
+        # Symbole, Pfeile & Dekoration
+        '★': '*', '☆': '*', '♠': '<>', '♣': '<>', '♥': '<3', '♦': '<>', '✓': 'check', '✔': 'check',
+        '✕': 'X', '✖': 'X', '✗': 'X', '❌': 'X', '⭕': 'O',
+        '→': '->', '←': '<-', '↑': '^', '↓': 'v',
+        '↔': '<->', '↕': '|', '⇧': '^', '⇩': 'v',
+
+        # Gradzeichen und ähnliches
+        '℃': '°C', '℉': '°F', '°': '°',
+        '©': '(c)', '®': '(r)', '™': '(tm)',
+
+        # Musik
+        '♩': '', '♪': '', '♫': '', '♬': '',
+
+        # Währungen
+        '￥': '¥', '￦': '₩', '€': 'EUR', '£': 'GBP', '¢': 'cent', '₹': 'INR',
+        '₽': 'RUB', '₺': 'TRY', '₩': 'KRW', '₴': 'UAH', '฿': 'THB',
+
+        # Zahlenzeichen
+        '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5',
+        '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
     }
 
+    
     for orig, repl in replacements.items():
         converted = converted.replace(orig, repl)
 

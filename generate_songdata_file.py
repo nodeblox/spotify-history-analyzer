@@ -74,7 +74,7 @@ def plot_song_listening_over_time(spotify_data, track_id, lastfm_data, filename,
     plt.bar(full_months, counts, color="skyblue")
     ax = plt.gca()
     ax.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
-    plt.title(f"Listening activity per month: {song_name} - {artist_name}")
+    plt.title(f"Listening activity per month: {utils.to_ascii(song_name)} - {utils.to_ascii(artist_name)}")
     plt.ylabel("times listened")
     plt.xticks(rotation=45)
     plt.grid(axis='y', linestyle='--', alpha=0.7)
