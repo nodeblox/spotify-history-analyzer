@@ -40,13 +40,127 @@ def main(input_filename):
                             f"- Songs, zu denen keine Tags auf Last.fm gefunden wurden, fließen nicht in tagspezifische Statistiken ein.\n")
     
     utils.append_md(output_file, f"# Analyse")
+    month_keys = prepare_month_files(data, output_path)
     analyse_general(data, output_file)
     analyse_activity_by_time(data, output_file, output_path)
     analyse_top_songs(data, output_file, output_path)
     analyse_top_artists(data, output_file, output_path)
-    utils.append_md(output_file, f"### [[./artists.md|Mehr Artist-Informationen]]\n[[./artists.md]]")
+    utils.append_md(output_file, f"### Links\n#### Listen\n- [[./artists.md|Artist-Liste]]\n- [[./songs.md|Songs-Liste]]\n#### Monate\n" + "".join(f'- [[./months/{month_key}.md]]\n' for month_key in month_keys))
 
     return output_file
+
+def prepare_month_files(data, output_path):
+    months_path = os.path.join(output_path, "months")
+    os.makedirs(months_path, exist_ok=True)
+    
+    songs_per_month = defaultdict(list)
+    for entry in data:
+        ts = entry.get('ts')
+        ms_played = entry.get('ms_played')  # Dauer in Millisekunden
+
+        if not ts or not ms_played:
+            continue
+        
+        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
+        month_key = date.strftime("%Y-%m")
+        songs_per_month[month_key].append(entry)
+    
+    for month_key, month_data in songs_per_month.items():
+        print(f"📊 Analysiere Monat {month_key}...")
+        month_file = os.path.join(months_path, month_key + ".md")
+        utils.clear_md(month_file)
+        
+        utils.append_md(month_file, f"# Statistiken des Monats {month_key}")
+        total_songs = len(month_data)
+        songs_with_min_duration = sum(1 for entry in month_data if entry.get('ms_played', 0) >= MIN_PLAY_DURATION)
+        total_duration = sum(entry.get('ms_played', 0) for entry in month_data) / 1000  # in Sekunden
+        total_duration_hours = total_duration / 3600
+        total_duration_days = total_duration_hours / 24
+        different_songs = set()
+        for entry in month_data:
+            track_uri = entry.get('spotify_track_uri')
+            if track_uri:
+                different_songs.add(track_uri)
+
+        start_date = datetime.strptime(month_data[0].get('ts'), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
+        end_date = datetime.strptime(month_data[-1].get('ts'), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
+
+        days_count = (end_date - start_date).days + 1  # +1, damit Start- und Endtag mitzählen
+
+        days_with_activity = set()
+        for entry in month_data:
+            ts = entry.get('ts')
+            if ts:
+                date = datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None).date()
+                days_with_activity.add(date)
+
+        utils.append_md(month_file, f"### Allgemeine Statistiken\n"
+                                f"- **Zeitspanne der Daten:** {start_date} bis {end_date} ({days_count} Tage)\n"
+                                f"- **Anzahl der Tage (mit Höraktivität):** {len(days_with_activity)}\n"
+                                f"- **Anzahl der gehörten Songs:** {total_songs}\n"
+                                f"- **Anzahl der gehörten Songs mit mindestens {(MIN_PLAY_DURATION / 1000):.0f} Sekunden Hördauer:** {songs_with_min_duration}\n"
+                                f"- **Anzahl der unterschiedlichen Songs:** {len(different_songs)}\n"
+                                f"- **Gesamthördauer:** {total_duration_days:.2f} Tage ({total_duration_hours:.2f} Stunden) ({total_duration / 60:.2f} Minuten)\n"
+                                f"- **Durchschnittliche Hördauer pro Tag:** {total_duration / days_count / 60:.2f} Minuten\n"
+                                f"- **Durchschnittliche Hördauer pro Tag (mit Höraktivität):** {total_duration / len(days_with_activity)/60:.2f} Minuten\n"
+                                f"- **Durchschnittliche Hördauer pro Song:** {(total_duration / total_songs) / 60:.2f} Minuten\n"
+                                f"- **Durchschnittliche Anzahl Songs (min {(MIN_PLAY_DURATION / 1000):.0f}s) pro Tag:** {songs_with_min_duration / days_count:.2f}\n"
+                                f"- **Durchschnittliche Anzahl Songs (min {(MIN_PLAY_DURATION / 1000):.0f}s) pro Tag (mit Höraktivität):** {songs_with_min_duration / len(days_with_activity):.2f}\n")
+    
+        activity = defaultdict(lambda: defaultdict(float))
+        days = defaultdict(set)
+
+        for entry in month_data:
+            ts = entry.get('ts')
+            ms_played = entry.get('ms_played')  # Dauer in Millisekunden
+
+            if not ts or not ms_played:
+                continue
+            
+            date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
+            weekday = date.strftime("%A")
+            hour = date.hour
+            month_key = date.strftime("%Y-%m")
+            date_str = date.strftime("%Y-%m-%d")
+
+            duration_min = ms_played / 60000  # Millisekunden in Minuten umrechnen
+
+            activity[weekday][hour] += duration_min
+            days[weekday].add(date_str)
+
+        # Farben definieren für Wochentage
+        weekday_colors = {
+            "Monday": "blue",
+            "Tuesday": "orange",
+            "Wednesday": "green",
+            "Thursday": "red",
+            "Friday": "purple",
+            "Saturday": "brown",
+            "Sunday": "pink"
+        }
+
+        plt.figure(figsize=(12, 6))
+        for weekday in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
+            hour_counts = activity[weekday]
+            total_days = len(days[weekday]) or 1  # Verhindert Division durch 0
+            # Mittelwert pro Stunde berechnen
+            hourly_avg = [hour_counts.get(h, 0) / total_days for h in range(24)]
+            plt.plot(range(24), hourly_avg, label=weekday, color=weekday_colors[weekday])
+        plt.title(f"Durchschnittliche Höraktivität pro Stunde – {month_key}")
+        plt.xlabel("Stunde (0–23)")
+        plt.ylabel("⌀ Minuten pro Stunde")
+        plt.ylim(0, 60)
+        plt.xticks(range(0, 24))
+        plt.grid(True, linestyle='--', alpha=0.5)
+        plt.legend()
+        plt.tight_layout()
+        chart_path = os.path.join(output_path, "img", f"songs_per_hour_{month_key}.png")
+        plt.savefig(chart_path, bbox_inches='tight', pad_inches=0.5)
+        plt.close()
+        utils.append_md(month_file, f"### Hörverhalten nach Uhrzeit\n"
+                                f"![Songs pro Stunde – {month_key}](../img/songs_per_hour_{month_key}.png)\n")
+        
+    return songs_per_month.keys()
 
 def analyse_general(data, output_file):
     print("📊 Analysiere allgemeine Statistiken...")
@@ -170,79 +284,6 @@ def analyse_activity_by_time(data, output_file, output_path):
 
     utils.append_md(output_file, f"### Hörverhalten nach Wochentag\n"
                             f"![Anzahl der Songs pro Tag](./img/songs_per_day_in_week.png)\n")
-    
-    activity_by_quarter = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
-    days_by_quarter = defaultdict(lambda: defaultdict(set))
-
-    for entry in data:
-        spotify_data = entry
-        ts = spotify_data.get('ts')
-        ms_played = spotify_data.get('ms_played')  # Dauer in Millisekunden
-
-        if not ts or not ms_played:
-            continue
-        
-        date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
-        weekday = date.strftime("%A")
-        hour = date.hour
-        quarter = f"{date.year}-Q{(date.month - 1)//3 + 1}"
-        date_str = date.strftime("%Y-%m-%d")
-
-        duration_min = ms_played / 60000  # Millisekunden in Minuten umrechnen
-
-        activity_by_quarter[quarter][weekday][hour] += duration_min
-        days_by_quarter[quarter][weekday].add(date_str)
-
-    # Farben definieren für Wochentage
-    weekday_colors = {
-        "Monday": "blue",
-        "Tuesday": "orange",
-        "Wednesday": "green",
-        "Thursday": "red",
-        "Friday": "purple",
-        "Saturday": "brown",
-        "Sunday": "pink"
-    }
-
-    for quarter in sorted(activity_by_quarter.keys()):
-        plt.figure(figsize=(12, 6))
-        for weekday in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
-            hour_counts = activity_by_quarter[quarter][weekday]
-            total_days = len(days_by_quarter[quarter][weekday]) or 1  # Verhindert Division durch 0
-
-            # Mittelwert pro Stunde berechnen
-            hourly_avg = [hour_counts.get(h, 0) / total_days for h in range(24)]
-
-            plt.plot(range(24), hourly_avg, label=weekday, color=weekday_colors[weekday])
-
-            # Start- und Enddatum für das Quartal bestimmen
-        year, q = map(int, quarter.replace("-Q", "-").split("-"))
-        start_month = (q - 1) * 3 + 1
-        start_date = datetime(year, start_month, 1)
-        if start_month == 10:
-            end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
-        else:
-            end_date = datetime(year, start_month + 3, 1) - timedelta(days=1)
-
-        start_str = start_date.strftime("%d.%m.%Y")
-        end_str = end_date.strftime("%d.%m.%Y")
-
-        plt.title(f"Durchschnittliche Höraktivität pro Stunde – {start_str} bis {end_str}")
-
-        plt.xlabel("Stunde (0–23)")
-        plt.ylabel("⌀ Minuten pro Stunde")
-        plt.ylim(0, 60)
-        plt.xticks(range(0, 24))
-        plt.grid(True, linestyle='--', alpha=0.5)
-        plt.legend()
-        plt.tight_layout()
-
-        chart_path = os.path.join(output_path, "img", f"songs_per_hour_{quarter}.png")
-        plt.savefig(chart_path, bbox_inches='tight', pad_inches=0.5)
-        plt.close()
-
-        utils.append_md(output_file, f"### Hörverhalten nach Uhrzeit – {start_str} bis {end_str}\n"
-                                f"![Songs pro Stunde – {quarter}](./img/songs_per_hour_{quarter}.png)\n")
 
 def analyse_top_songs(data, output_file, output_path):
     print("📊 Analysiere Top-Songs...")
@@ -312,6 +353,7 @@ def analyse_top_songs(data, output_file, output_path):
     utils.append_md(output_file, "\n")
 
     for month in sorted(top_songs_per_month.keys()):
+        month_file = os.path.join(output_path, "months", month + ".md")
         songs = top_songs_per_month[month]
         # Sortiere Songs nach Anzahl der Plays
         songs = sorted(songs.values(), key=lambda x: x["times_played"], reverse=True)
@@ -319,12 +361,12 @@ def analyse_top_songs(data, output_file, output_path):
         # Nimm die Top 10 Songs
         top_songs = songs[:25]
 
-        utils.append_md(output_file, f"### Top-Songs im Monat {month}")
+        utils.append_md(month_file, "### Top-Songs")
 
         i = 0
-        utils.append_md(output_file, "##### 1 bis 10")
+        utils.append_md(month_file, "##### 1 bis 10")
         for song in top_songs:
-            if i == 10: utils.append_md(output_file, "##### 11 bis 25")
+            if i == 10: utils.append_md(month_file, "##### 11 bis 25")
             i+=1
 
             cur.execute("SELECT * FROM songdata WHERE id = ?", [song.get("spotify_track_uri")])
@@ -336,12 +378,12 @@ def analyse_top_songs(data, output_file, output_path):
             times_played = song.get("times_played", 0)
 
             if lastfm_data:
-                link = f'[[./songs/{song["spotify_track_uri"][14:]}.md|{track_name}]]'
+                link = f'[[../songs/{song["spotify_track_uri"][14:]}.md|{track_name}]]'
             else:
                 link = track_name
 
             utils.append_md(
-                output_file,
+                month_file,
                 f"{i}. **{link}** von {artist_name} – **{times_played}** mal gehört",
             )
         utils.append_md(output_file, "\n")
@@ -389,12 +431,13 @@ def analyse_top_artists(data, output_file, output_path):
         if i == 10: utils.append_md(output_file, "##### 11 bis 25")
         if i == 25: utils.append_md(output_file, "##### 26 bis 40")
         i+=1
-        link = f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] is not None else artist
+        link = f"[[./artists/{utils.sanitize_filename(artist)}.md|{artist}]]" if os.path.exists(os.path.join(output_path, "artists", utils.sanitize_filename(artist or "") + ".md")) else f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
         utils.append_md(output_file, f"{i}. **{link}** mit **{(played_ms / 1000 / 60 / 60):.2f} Stunden** Spielzeit")
 
     # Monatliche Auswertung
     for month in sorted(artist_times_by_month):
-        utils.append_md(output_file, f"\n### Top-Artists im Monat {month}")
+        month_file = os.path.join(output_path, "months", month + ".md")
+        utils.append_md(month_file, "\n### Top-Artists")
         
         # Kuchendiagramm für diesen Monat
         pie_path_month = utils.plot_pie_chart(artist_times_by_month[month], 
@@ -403,7 +446,7 @@ def analyse_top_artists(data, output_file, output_path):
                                         output_path,
                                         data_size=25,
                                         show_percentages_in_legend=True)
-        utils.append_md(output_file, f"![Top 25 Artists {month}](./img/{os.path.basename(pie_path_month)})")
+        utils.append_md(month_file, f"![Top 25 Artists {month}](../img/{os.path.basename(pie_path_month)})")
         
         monthly_sorted = sorted(
             artist_times_by_month[month].items(), key=lambda x: x[1], reverse=True
@@ -412,12 +455,11 @@ def analyse_top_artists(data, output_file, output_path):
         for idx, (artist, played_ms) in enumerate(monthly_sorted, start=1):
             if artist == "unknown":
                 continue
-            link = f"[[./artists/{utils.sanitize_filename(artist)}.md|{artist}]]" if os.path.exists(os.path.join("output", "artists", utils.sanitize_filename(artist or "") + ".md")) else f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
+            link = f"[[./artists/{utils.sanitize_filename(artist)}.md|{artist}]]" if os.path.exists(os.path.join(output_path, "artists", utils.sanitize_filename(artist or "") + ".md")) else f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
             stunden = played_ms / 1000 / 60 / 60
-            utils.append_md(output_file, f"{idx}. **{link}** – **{stunden:.2f} Stunden**")
+            utils.append_md(month_file, f"{idx}. **{link}** – **{stunden:.2f} Stunden**")
     
-        # --- Diagramm: Top 10 Artists pro Monat (Stunden gehört) ---
-    import matplotlib.pyplot as plt
+    # --- Diagramm: Top 10 Artists pro Monat (Stunden gehört) ---
 
     # Alle Monate chronologisch sortieren
     all_months = sorted(artist_times_by_month.keys())
