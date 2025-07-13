@@ -160,6 +160,36 @@ def prepare_month_files(data, output_path):
         utils.append_md(month_file, f"### Hörverhalten nach Uhrzeit\n"
                                 f"![Songs pro Stunde – {month_key}](../img/songs_per_hour_{month_key}.png)\n")
         
+        # Hördauer pro Tag im Monat berechnen (Balkendiagramm)
+        daily_duration = defaultdict(float)
+        for entry in month_data:
+            ts = entry.get('ts')
+            ms_played = entry.get('ms_played')
+            if not ts or not ms_played:
+                continue
+            date = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc).astimezone(ZoneInfo(TIMEZONE) if TIMEZONE else None)
+            date_str = date.strftime("%Y-%m-%d")
+            daily_duration[date_str] += ms_played / 60000  # Minuten
+
+        # Sortieren der Daten nach Datum
+        sorted_days = sorted(daily_duration.items())
+        dates, durations = zip(*sorted_days)
+
+        plt.figure(figsize=(14, 6))
+        plt.bar(dates, durations, color="skyblue")
+        plt.xticks(rotation=45, ha='right')
+        plt.ylabel("Minuten")
+        plt.title(f"Hördauer pro Tag – {month_key}")
+        plt.tight_layout()
+        chart_daily_path = os.path.join(output_path, "img", f"daily_minutes_{month_key}.png")
+        plt.savefig(chart_daily_path, bbox_inches='tight', pad_inches=0.5)
+        plt.close()
+
+        utils.append_md(month_file, f"### Tägliche Hördauer\n"
+                                    f"![Hördauer pro Tag – {month_key}](../img/daily_minutes_{month_key}.png)\n")
+
+        
     return songs_per_month.keys()
 
 def analyse_general(data, output_file):
@@ -455,7 +485,7 @@ def analyse_top_artists(data, output_file, output_path):
         for idx, (artist, played_ms) in enumerate(monthly_sorted, start=1):
             if artist == "unknown":
                 continue
-            link = f"[[./artists/{utils.sanitize_filename(artist)}.md|{artist}]]" if os.path.exists(os.path.join(output_path, "artists", utils.sanitize_filename(artist or "") + ".md")) else f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
+            link = f"[[../artists/{utils.sanitize_filename(artist)}.md|{artist}]]" if os.path.exists(os.path.join(output_path, "artists", utils.sanitize_filename(artist or "") + ".md")) else f"[{artist}]({artist_urls[artist]})" if artist_urls[artist] else artist
             stunden = played_ms / 1000 / 60 / 60
             utils.append_md(month_file, f"{idx}. **{link}** – **{stunden:.2f} Stunden**")
     
