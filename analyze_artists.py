@@ -1,35 +1,15 @@
 import os
 import sys
-import json
 import time
-import sqlite3
 import requests
 import urllib.parse
 from collections import defaultdict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import utils
-
-# === Datenbank initialisieren ===
-CACHE_DIR = ".cache"
-DB_PATH = os.path.join(CACHE_DIR, "cache.db")
-os.makedirs(CACHE_DIR, exist_ok=True)
-
-conn = sqlite3.connect(DB_PATH)
-conn.row_factory = sqlite3.Row
-cur = conn.cursor()
-
-# Tabellen erstellen
-cur.execute("CREATE TABLE IF NOT EXISTS songdata (id TEXT PRIMARY KEY, json JSON)")
-cur.execute("CREATE TABLE IF NOT EXISTS artistdata (artist_name TEXT PRIMARY KEY, json JSON)")
-conn.commit()
-
-# === Konfiguration laden ===
-load_dotenv()
-TIMEZONE = os.getenv("TIMEZONE")
-MIN_PLAY_DURATION = os.getenv("MIN_PLAY_DURATION", 20000)  # in ms
+from database import db
+from config import TIMEZONE, MIN_PLAY_DURATION
 
 def main(input_filename: str):
     input_path = os.path.join("userdata", input_filename)
@@ -57,12 +37,9 @@ def analyse(data, output_file, output_dir):
             continue
 
         track_id = song.get("spotify_track_uri")
-        cur.execute("SELECT json FROM songdata WHERE id = ?", [track_id])
-        row = cur.fetchone()
-
-        if row:
-            lastfm_data = json.loads(row["json"]).get("track")
-            if artist not in artist_urls and lastfm_data:
+        lastfm_data = db.get_song_data(track_id)
+        if lastfm_data:
+            if artist not in artist_urls:
                 artist_urls[artist] = lastfm_data.get("artist", {}).get("url")
         artist_times[artist] += song.get("ms_played", 0)
 
@@ -80,11 +57,9 @@ def analyse(data, output_file, output_dir):
 def get_artist_data(index, data, artist_name, output_dir, artist_url=None):
     start = time.time()
 
-    cur.execute("SELECT json FROM artistdata WHERE artist_name = ?", [artist_name])
-    row = cur.fetchone()
+    artist_data = db.get_artist_data(artist_name)
 
-    if row:
-        artist_data = json.loads(row["json"])
+    if artist_data:
         from_cache = True
     else:
         api_url = (
@@ -97,11 +72,7 @@ def get_artist_data(index, data, artist_name, output_dir, artist_url=None):
             return
 
         artist_data = response.json()
-        cur.execute(
-            "INSERT OR REPLACE INTO artistdata (artist_name, json) VALUES (?, ?)",
-            (artist_name, json.dumps(artist_data, ensure_ascii=False))
-        )
-        conn.commit()
+        db.store_artist_data(artist_name, artist_data)
         from_cache = False
 
     # Markdown-Datei schreiben
@@ -210,9 +181,7 @@ def get_most_heared_songs(data, artist, artist_filepath, output_dir):
         if artist_name != artist or not track_uri or not ms_played or ms_played < MIN_PLAY_DURATION:
             continue
 
-        cur.execute("SELECT json FROM songdata WHERE id = ?", [track_uri])
-        row = cur.fetchone()
-        lastfm_data = json.loads(row["json"]).get("track") if row else None
+        lastfm_data = db.get_song_data(track_uri)
 
         if track_uri not in song_stats:
             song_stats[track_uri] = {
@@ -247,7 +216,7 @@ def get_most_heared_songs(data, artist, artist_filepath, output_dir):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z. B. history.json)")
+        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z.B. history.json)")
         sys.exit(1)
 
     main(sys.argv[1])

@@ -4,21 +4,8 @@ import urllib.parse
 import os
 import time
 import sys
-from dotenv import load_dotenv
-import sqlite3
-
-# === Datenbank initialisieren ===
-os.makedirs(os.path.join(".cache"), exist_ok=True)
-conn = sqlite3.connect("./.cache/cache.db")
-conn.row_factory = sqlite3.Row
-cur = conn.cursor()
-# Tabelle erstellen
-cur.execute("CREATE TABLE IF NOT EXISTS songdata (id STRING PRIMARY KEY, json JSON)")
-conn.commit()
-
-# === .env laden ===
-load_dotenv()
-LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
+from database import db
+from config import LASTFM_API_KEY
 
 # === Last.fm Request ===
 def get_lastfm_info(artist, track):
@@ -32,16 +19,6 @@ def get_lastfm_info(artist, track):
     if response.status_code != 200:
         raise Exception(f"Last.fm-Fehler: {response.status_code} - {response.text}")
     return response.json()
-
-def fetch_and_store(artist, track, track_id):
-    try:
-        lastfm_data = get_lastfm_info(artist, track)
-    except Exception as e:
-        print(f"   ❌ Fehler: {e}")
-        return track_id, artist, track, 'error'
-    cur.execute("INSERT INTO songdata VALUES (?, ?)", [track_id, json.dumps(lastfm_data)])
-    conn.commit()
-    return track_id, artist, track, 'api'
 
 # === Hauptprogramm ===
 def main(input_filename="spotify_history.json"):
@@ -70,10 +47,8 @@ def main(input_filename="spotify_history.json"):
         if not track_id or not artist or not track:
             continue
 
-        cur.execute("SELECT * FROM songdata WHERE id = ?", [track_id])
-        row = cur.fetchone()
-        if row:
-            lastfm_data = row['json']
+        lastfm_data = db.get_song_data(track_id)
+        if lastfm_data:
             in_cache = True
         else:
             try:
@@ -81,19 +56,17 @@ def main(input_filename="spotify_history.json"):
             except Exception as e:
                 print(f"   ❌ Fehler: {e}")
                 continue
-            cur.execute("INSERT INTO songdata VALUES (?, ?)", [track_id, json.dumps(lastfm_data)])
-            conn.commit()
+            db.store_song_data(track_id, lastfm_data)
         print(f"   ✅ | {str(current_count).zfill(len(str(data_count)))} / {data_count} | {artist} - {track} (ID: {track_id}) ({'cache' if in_cache else 'api'})")
         end_processing_ts = time.time()
         sleep_time: float = 0.25 - (end_processing_ts - start_processing_ts)
         if not in_cache and sleep_time > 0:
             time.sleep(sleep_time)  # API-Rate-Limit
-    conn.close()
     print(f"\n✅ Alle Songdaten abgerufen!")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z. B. history.json)")
+        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z.B. history.json)")
         sys.exit(1)
     input_filename = sys.argv[1]
     main(input_filename)

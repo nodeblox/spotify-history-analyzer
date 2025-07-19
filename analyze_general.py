@@ -3,25 +3,12 @@ import sys
 import os
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from dotenv import load_dotenv
 from collections import defaultdict
 import utils
-import sqlite3
+import copy
 import json
-
-# === Datenbank initialisieren ===
-os.makedirs(os.path.join(".cache"), exist_ok=True)
-conn = sqlite3.connect("./.cache/cache.db")
-conn.row_factory = sqlite3.Row
-cur = conn.cursor()
-# Tabelle erstellen
-cur.execute("CREATE TABLE IF NOT EXISTS songdata (id STRING PRIMARY KEY, json JSON)")
-conn.commit()
-
-load_dotenv()
-TIMEZONE = os.getenv("TIMEZONE")
-
-MIN_PLAY_DURATION = os.getenv("MIN_PLAY_DURATION", 20000)  # in ms
+from database import db
+from config import TIMEZONE, MIN_PLAY_DURATION
 
 def main(input_filename):
     input_path = os.path.join("userdata", input_filename)
@@ -340,7 +327,7 @@ def analyse_top_songs(data, output_file, output_path):
 
         # Monatliche Songs
         if uri not in top_songs_per_month[month]:
-            new_entry = json.loads(json.dumps(entry))  # deepcopy via JSON
+            new_entry = copy.deepcopy(entry)  # deepcopy via copy-Modul
             new_entry["times_played"] = 1
             top_songs_per_month[month][uri] = new_entry
         else:
@@ -348,7 +335,7 @@ def analyse_top_songs(data, output_file, output_path):
 
         # Gesamt
         if uri not in top_songs_full_time:
-            new_entry = json.loads(json.dumps(entry))  # deepcopy via JSON
+            new_entry = copy.deepcopy(entry)  # deepcopy via copy-Modul
             new_entry["times_played"] = 1
             top_songs_full_time[uri] = new_entry
         else:
@@ -365,8 +352,7 @@ def analyse_top_songs(data, output_file, output_path):
         if i == 10: utils.append_md(output_file, "##### 11 bis 25")
         i+=1
         
-        cur.execute("SELECT * FROM songdata WHERE id = ?", [song.get("spotify_track_uri")])
-        lastfm_data = cur.fetchone()
+        lastfm_data = db.get_song_data(song["spotify_track_uri"])
 
         track_name = song.get("master_metadata_track_name", "Unbekannt")
         artist_name = song.get("master_metadata_album_artist_name", "Unbekannt")
@@ -399,9 +385,7 @@ def analyse_top_songs(data, output_file, output_path):
             if i == 10: utils.append_md(month_file, "##### 11 bis 25")
             i+=1
 
-            cur.execute("SELECT * FROM songdata WHERE id = ?", [song.get("spotify_track_uri")])
-            row = cur.fetchone()
-            lastfm_data = json.loads(row["json"]).get("track") if row else None
+            lastfm_data = db.get_song_data(song["spotify_track_uri"])
 
             track_name = song.get("master_metadata_track_name", "Unbekannt")
             artist_name = song.get("master_metadata_album_artist_name", "Unbekannt")
@@ -429,9 +413,7 @@ def analyse_top_artists(data, output_file, output_path):
     for song in data:
         if song is None: continue
         artist = song.get("master_metadata_album_artist_name")
-        cur.execute("SELECT * FROM songdata WHERE id = ?", [song.get("spotify_track_uri")])
-        row = cur.fetchone()
-        lastfm_data = json.loads(row["json"]).get("track") if row else None
+        lastfm_data = db.get_song_data(song.get("spotify_track_uri"))
         artist_urls[artist] = lastfm_data['artist']['url'] if lastfm_data else None
         artist_times[artist] += song['ms_played']
         ts = song['ts']

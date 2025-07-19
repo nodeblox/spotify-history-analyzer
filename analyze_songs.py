@@ -1,29 +1,15 @@
 import utils
 import os
-import sqlite3
 import json
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import sys
-
-load_dotenv()
-MIN_PLAY_DURATION = os.getenv("MIN_PLAY_DURATION", 20000)  # in ms
-RECREATE_SONGDATA_FILES = os.getenv("RECREATE_SONGDATA_FILES", False)
-TIMEZONE = os.getenv("TIMEZONE")
+from config import TIMEZONE, MIN_PLAY_DURATION, RECREATE_SONGDATA_FILES
+from database import db
 
 created_files = set()
-
-# === Datenbank initialisieren ===
-os.makedirs(os.path.join(".cache"), exist_ok=True)
-conn = sqlite3.connect("./.cache/cache.db")
-conn.row_factory = sqlite3.Row
-cur = conn.cursor()
-# Tabelle erstellen
-cur.execute("CREATE TABLE IF NOT EXISTS songdata (id STRING PRIMARY KEY, json JSON)")
-conn.commit()
 
 def main(input_filename: str):
     input_path = os.path.join("userdata", input_filename)
@@ -72,8 +58,7 @@ def main(input_filename: str):
     for song in all_songs_sorted:
         i+=1
         
-        cur.execute("SELECT * FROM songdata WHERE id = ?", [song.get("spotify_track_uri")])
-        lastfm_data = cur.fetchone()
+        lastfm_data = db.get_song_data(song.get("spotify_track_uri"))
 
         track_name = song.get("master_metadata_track_name", "Unbekannt")
         artist_name = song.get("master_metadata_album_artist_name", "Unbekannt")
@@ -172,17 +157,10 @@ def generate_songdata_file(track_id, data_path, output_path):
     if not spotify_data:
         print(f"⚠️  | Es wurde keine Höraktivität für den Song {track_id} gefunden. - Diese wird der songdata file nicht beigefügt!")
     
-    cur.execute("SELECT * FROM songdata WHERE id = ?", [track_id])
-    row = cur.fetchone()
+    lastfm_data = db.get_song_data(track_id)
 
-    if row is None:
+    if lastfm_data is None:
         print(f"❌ | Keine gecachten Last.FM-Daten für Song-ID {track_id} gefunden – Generierung wird übersprungen!")
-        return "error"
-
-    try:
-        lastfm_data = json.loads(row["json"]).get("track")
-    except (KeyError, TypeError, json.JSONDecodeError):
-        print(f"❌ | Fehler beim Verarbeiten der gecachten Daten für Song-ID {track_id} – Generierung wird übersprungen!")
         return "error"
 
     if not lastfm_data or not lastfm_data.get("name"):
@@ -291,7 +269,7 @@ def append_full_listening_history(output_file, data):
         
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z. B. history.json)")
+        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z.B. history.json)")
         sys.exit(1)
     input_filename = sys.argv[1]
     main(input_filename)

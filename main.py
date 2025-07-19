@@ -15,7 +15,7 @@ def main(input_filename):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z. B. history.json)")
+        print("❌ Fehler: Gib den Namen der history-Datei als Argument an (z.B. history.json)")
         sys.exit(1)
     input_filename = sys.argv[1]
     main(input_filename)

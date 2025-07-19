@@ -4,10 +4,28 @@ import time
 import os
 import re
 import json
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+from config import TIMEZONE
 
 def load_data(file_path):
-    with open(file_path, 'r', encoding='utf-8') as file:
-        return json.load(file)
+    """
+    Lädt JSON-Daten aus einer Datei und gibt sie zurück.
+    Fügt Fehlerbehandlung hinzu, um Probleme beim Laden zu vermeiden.
+    """
+    if not os.path.exists(file_path):
+        print(f"❌ Fehler: Datei '{file_path}' existiert nicht.")
+        return None
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            return json.load(file)
+    except json.JSONDecodeError as e:
+        print(f"❌ Fehler beim Dekodieren der JSON-Datei '{file_path}': {e}")
+    except Exception as e:
+        print(f"❌ Fehler beim Laden der Datei '{file_path}': {e}")
+    
+    return None
 
 def append_md(filename, text=""):
     try:
@@ -23,6 +41,28 @@ def clear_md(filename):
     except Exception as e:
         print(f"Fehler beim Leeren der Datei '{filename}': {e}")
 
+def parse_timestamp(ts_string):
+    """Parse timestamp string and convert to local timezone"""
+    if not ts_string:
+        return None
+    
+    date = datetime.strptime(ts_string, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    if TIMEZONE:
+        date = date.astimezone(ZoneInfo(TIMEZONE))
+    return date
+
+def format_duration(ms):
+    """Format milliseconds to human readable duration"""
+    if ms <= 0:
+        return "0sec"
+    
+    minutes = ms // 60000
+    seconds = ((ms % 60000) / 1000)
+    return f"{minutes}min, {seconds:.0f}sec"
+
+def create_progress_indicator(current, total):
+    """Create a consistent progress indicator string"""
+    return f"{str(current).zfill(len(str(total)))} / {total}"
 
 def to_ascii(text):
     converted = unidecode(text)
